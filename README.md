@@ -7,6 +7,21 @@ candidates using a mechanical, Tastytrade-style methodology.
 > **Educational tool, not investment advice.** All analysis runs locally in your
 > browser from the data you provide. Always confirm against live quotes before trading.
 
+## Screenshots
+
+New-trade candidates — the **best of 9 strategies** per name, with concrete strikes,
+sizing and a management plan. The **/VX** you enter tilts the ranking (shown as the
+regime label). *Sample data.*
+
+![New trade candidates](docs/candidates.png)
+
+<details>
+<summary>Full dashboard — risk read, buying-power deployment, positions, management actions & candidates</summary>
+
+![Dashboard overview](docs/screenshot.png)
+
+</details>
+
 ## What it does
 
 - **Authenticates** to the Tastytrade API with OAuth2 (refresh token).
