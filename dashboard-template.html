@@ -1,0 +1,1209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Options Portfolio Manager</title>
+<style>
+* { margin: 0; padding: 0; }
+body { margin: 0; }
+.viz-root {
+  --surface-1:      #fcfcfb;
+  --plane:          #f9f9f7;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --grid:           #e1e0d9;
+  --baseline:       #c3c2b7;
+  --border:         rgba(11,11,11,0.10);
+
+  --series-1: #2a78d6; /* blue */
+  --series-2: #1baf7a; /* aqua */
+  --series-3: #eda100; /* yellow */
+  --series-4: #008300; /* green */
+  --series-5: #4a3aa7; /* violet */
+  --series-6: #e34948; /* red */
+  --series-7: #e87ba4; /* magenta */
+  --series-8: #eb6834; /* orange */
+
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --serious:  #ec835a;
+  --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  .viz-root {
+    --surface-1:      #1a1a19;
+    --plane:          #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+
+    --series-1: #3987e5;
+    --series-2: #199e70;
+    --series-3: #c98500;
+    --series-4: #008300;
+    --series-5: #9085e9;
+    --series-6: #e66767;
+    --series-7: #d55181;
+    --series-8: #d95926;
+
+    --good:     #0ca30c;
+    --warning:  #fab219;
+    --serious:  #ec835a;
+    --critical: #d03b3b;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  --surface-1: #1a1a19; --plane:#0d0d0d; --text-primary:#ffffff; --text-secondary:#c3c2b7;
+  --text-muted:#898781; --grid:#2c2c2a; --baseline:#383835; --border: rgba(255,255,255,0.10);
+  --series-1:#3987e5; --series-2:#199e70; --series-3:#c98500; --series-4:#008300;
+  --series-5:#9085e9; --series-6:#e66767; --series-7:#d55181; --series-8:#d95926;
+}
+:root[data-theme="light"] .viz-root {
+  --surface-1:#fcfcfb; --plane:#f9f9f7; --text-primary:#0b0b0b; --text-secondary:#52514e;
+  --text-muted:#898781; --grid:#e1e0d9; --baseline:#c3c2b7; --border: rgba(11,11,11,0.10);
+  --series-1:#2a78d6; --series-2:#1baf7a; --series-3:#eda100; --series-4:#008300;
+  --series-5:#4a3aa7; --series-6:#e34948; --series-7:#e87ba4; --series-8:#eb6834;
+}
+</style>
+</head>
+<body>
+<style>
+* { box-sizing: border-box; }
+.viz-root {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--plane);
+  color: var(--text-primary);
+  padding: 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+.subtitle { color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 16px; }
+.header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.theme-btn { background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); flex-shrink: 0; }
+.disclaimer {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.panel h2 { font-size: 1rem; margin: 0 0 10px; }
+.panel h3 { font-size: 0.88rem; margin: 0 0 8px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+textarea {
+  width: 100%; min-height: 110px; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.78rem; padding: 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--plane); color: var(--text-primary); resize: vertical;
+}
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+label { font-size: 0.8rem; color: var(--text-secondary); }
+input[type="date"], input[type="number"] {
+  padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--plane); color: var(--text-primary); font-size: 0.8rem;
+}
+input[type="number"].pct { width: 56px; }
+input[type="number"].bp { width: 120px; }
+button {
+  font: inherit; font-size: 0.82rem; padding: 7px 14px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--series-1); color: white; cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--text-primary); }
+button:hover { filter: brightness(1.08); }
+.error { color: var(--critical); font-size: 0.82rem; margin-top: 8px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.tile .value { font-size: 1.6rem; font-weight: 600; font-variant-numeric: proportional-nums; }
+.tile .label { font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px; }
+.tile .value.crit { color: var(--critical); }
+.tile .value.warn { color: var(--warning); }
+.tile .value.good { color: var(--good); }
+
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+@media (max-width: 720px) { .charts { grid-template-columns: 1fr; } }
+.chart-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; overflow-x: auto; }
+.bar-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 0.78rem; }
+.bar-label { width: 80px; flex-shrink: 0; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+.bar-track { flex: 1; background: var(--grid); border-radius: 4px; height: 16px; position: relative; }
+.bar-fill { height: 100%; border-radius: 4px; min-width: 3px; }
+.bar-value { width: 64px; flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 0.76rem; color: var(--text-secondary); }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.bullet-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 0.8rem; }
+.bullet-label { width: 110px; flex-shrink: 0; color: var(--text-secondary); }
+.bullet-track { flex: 1; background: var(--grid); border-radius: 4px; height: 18px; position: relative; }
+.bullet-fill { height: 100%; border-radius: 4px; min-width: 3px; }
+.bullet-target { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text-primary); }
+.bullet-value { width: 190px; flex-shrink: 0; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+th { color: var(--text-secondary); font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.02em; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: var(--plane); }
+
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 100px; font-size: 0.74rem; font-weight: 600; white-space: nowrap; }
+.badge.critical { background: color-mix(in srgb, var(--critical) 16%, transparent); color: var(--critical); }
+.badge.serious  { background: color-mix(in srgb, var(--serious) 18%, transparent); color: var(--serious); }
+.badge.warning  { background: color-mix(in srgb, var(--warning) 22%, transparent); color: #8a5a00; }
+@media (prefers-color-scheme: dark) { .badge.warning { color: #fdd77a; } }
+:root[data-theme="dark"] .badge.warning { color: #fdd77a; }
+:root[data-theme="light"] .badge.warning { color: #8a5a00; }
+.badge.good     { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.badge.info     { background: var(--grid); color: var(--text-secondary); }
+
+.action-card {
+  display: flex; gap: 12px; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--border); margin-bottom: 8px; background: var(--surface-1);
+}
+.action-card .icon { font-size: 1.1rem; line-height: 1.3; }
+.action-card .body strong { font-size: 0.86rem; }
+.action-card .body p { margin: 3px 0 0; font-size: 0.8rem; color: var(--text-secondary); }
+
+.idea-card {
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; background: var(--surface-1);
+}
+.idea-card strong { font-size: 0.86rem; }
+.idea-card p { margin: 3px 0 0; font-size: 0.8rem; color: var(--text-secondary); }
+
+details summary { cursor: pointer; font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px; }
+.empty { color: var(--text-muted); font-size: 0.85rem; padding: 12px 0; }
+</style>
+
+<div class="viz-root">
+  <div class="header-row">
+    <div>
+      <h1>Options Portfolio Manager</h1>
+      <p class="subtitle">Paste or upload your positions, get a risk read, management actions, and new-trade candidates.</p>
+    </div>
+    <button class="theme-btn" id="themeBtn" title="Cycle theme: auto / dark / light">&#127769; Theme: auto</button>
+  </div>
+
+  <div class="disclaimer">
+    Educational tool, not personalized investment advice. All analysis runs locally in this page from the data you paste — nothing is fetched from a broker automatically (browser sandboxing blocks that). Suggestions come from simple, editable rules (DTE thresholds, moneyness, % of max profit) — always confirm against live quotes before trading.
+  </div>
+
+  <div class="panel">
+    <h2>1. Your positions</h2>
+    <textarea id="posInput" spellcheck="false"></textarea>
+    <div class="row">
+      <label for="asOf">As of date</label>
+      <input type="date" id="asOf">
+      <label for="bp">Total buying power</label>
+      <input type="number" class="bp" id="bp" placeholder="e.g. 50000" min="0" step="100">
+      <label for="vix">/VX level</label>
+      <input type="number" class="pct" id="vix" placeholder="e.g. 22" min="0" step="0.1">
+      <button id="analyzeBtn">Analyze portfolio</button>
+      <button class="secondary" id="uploadBtn">Upload file (JSON / CSV)</button>
+      <button class="secondary" id="sampleBtn">Load sample data</button>
+      <input type="file" id="fileInput" accept=".json,.csv,.txt" style="display:none">
+    </div>
+    <div class="row">
+      <label>Mix of allocated buying power —</label>
+      <label for="tgtStock">Stock</label><input type="number" class="pct" id="tgtStock" value="40" min="0" max="100" step="1">%
+      <label for="tgtPremium">Premium selling</label><input type="number" class="pct" id="tgtPremium" value="50" min="0" max="100" step="1">%
+      <label for="tgtMoon">Moon shots</label><input type="number" class="pct" id="tgtMoon" value="10" min="0" max="100" step="1">%
+    </div>
+    <details>
+      <summary>Field reference</summary>
+      <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:6px;line-height:1.5">
+        JSON array. Options: <code>{symbol, type:"put"|"call", side:"short"|"long", strike, expiration:"YYYY-MM-DD", qty, credit|cost, currentPrice, underlyingPrice}</code>.
+        Stock: <code>{symbol, type:"stock", qty, costBasis, underlyingPrice}</code>.
+        Optional <code>watchlist</code> array for candidate screening: bare tickers <code>["AMD","COST"]</code>, or enriched objects <code>{symbol, list, price, ivr, liquidity (1-4★), beta, earningsDays, yearHigh, yearLow, etf}</code>. Each candidate is scored against the entry rules (liquidity ≥3★, IVR&gt;30 to sell premium, no earnings within 45 DTE, no long near 52-wk highs, short only ETFs near lows) and given a structure recommendation; missing fields show as "?" and are flagged to confirm manually.
+        Strategy grouping: option legs sharing an underlying and expiration are analyzed as one strategy (vertical, strangle, iron condor, …), so risk and buying power reflect the combined structure — a defined-risk spread uses width − net credit, not naked margin on each leg; a short call covered by held shares waives its margin.
+        Buying-power bucketing: stock = market value; premium selling = net-credit structures with a short leg (defined-risk = width − credit; naked = ~20% of underlying notional, a rough Reg-T-style estimate, not your broker's figure); moon shots = net-debit / long-only structures, capital = debit paid.
+        Total deployment cap is set by /VX (rulebook): ≥25 → deploy up to 50% of total buying power; 20-25 → 45%; 18-20 → 40%; below 18 → 30%. The stock/premium/moon-shot mix percentages above apply to that deployed (allocated) portion, not total buying power.
+        CSV upload: a header row plus columns like Symbol, Type (call/put/stock), Quantity (negative = short), Strike, Expiration, Price/Avg Open Price, Mark, Underlying Price. OCC option symbols (e.g. "AAPL 260711P00180000") are decoded automatically. The parsed result lands in the box above for review — nothing leaves this page.
+      </div>
+    </details>
+    <div class="error" id="errorMsg" style="display:none"></div>
+  </div>
+
+  <div id="results" style="display:none">
+    <div class="tiles" id="tiles"></div>
+
+    <div class="panel" id="bpPanel" style="display:none">
+      <h2>Buying power deployment &amp; mix vs. target</h2>
+      <p class="subtitle" id="bpSubtitle" style="margin-bottom:14px"></p>
+      <div id="bpChart"></div>
+      <div class="legend" id="bpLegend">
+        <div class="legend-item"><span class="swatch" style="background:var(--text-primary)"></span>Target</div>
+      </div>
+    </div>
+
+    <div class="charts">
+      <div class="chart-card">
+        <h3>Capital at risk by underlying</h3>
+        <div id="allocChart"></div>
+        <div class="legend" id="allocLegend"></div>
+      </div>
+      <div class="chart-card">
+        <h3>Days to expiration</h3>
+        <div id="dteChart"></div>
+        <div class="legend" id="dteLegend"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Positions</h2>
+      <div style="overflow-x:auto">
+        <table id="posTable">
+          <thead>
+            <tr><th>Status</th><th>Symbol</th><th>Type</th><th class="num">Strike</th><th>Expiration</th><th class="num">DTE</th><th class="num">Qty</th><th>Note</th></tr>
+          </thead>
+          <tbody id="posTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Suggested management actions</h2>
+      <div id="actionsList"></div>
+    </div>
+
+    <div class="panel">
+      <div class="header-row" style="align-items:center;margin-bottom:10px">
+        <h2 style="margin:0">New trade candidates</h2>
+        <button id="uploadWatchBtn">&#128228; Upload watchlist CSV</button>
+      </div>
+      <div id="ideasList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SAMPLE = {
+  positions: [
+    {symbol:"AAPL", type:"put",  side:"short", strike:180, expiration:"2026-07-11", qty:1, credit:2.10, currentPrice:0.35, underlyingPrice:198.4},
+    {symbol:"AAPL", type:"stock", qty:200, costBasis:175.20, underlyingPrice:198.4},
+    {symbol:"MSFT", type:"call", side:"short", strike:460, expiration:"2026-07-18", qty:2, credit:3.40, currentPrice:4.90, underlyingPrice:468.2},
+    {symbol:"NVDA", type:"put",  side:"short", strike:130, expiration:"2026-07-11", qty:1, credit:2.75, currentPrice:6.10, underlyingPrice:121.0},
+    {symbol:"SPY",  type:"put",  side:"long",  strike:540, expiration:"2026-09-19", qty:2, cost:8.20, currentPrice:6.40, underlyingPrice:552.0},
+    {symbol:"TSLA", type:"call", side:"short", strike:330, expiration:"2026-07-25", qty:1, credit:5.10, currentPrice:2.30, underlyingPrice:301.5}
+  ],
+  watchlist: [
+    {symbol:"AMD",  list:"Cavalo", price:168, ivr:45, liquidity:4, beta:1.9, earningsDays:60, yearHigh:190, yearLow:120},
+    {symbol:"COST", list:"Watch 1", price:940, ivr:22, liquidity:4, beta:0.8, earningsDays:12, yearHigh:1080, yearLow:840},
+    {symbol:"XLE",  list:"Watch 2", price:88, ivr:38, liquidity:3, beta:1.0, earningsDays:null, yearHigh:94, yearLow:80, etf:true}
+  ]
+};
+
+const seriesColors = ['var(--series-1)','var(--series-2)','var(--series-3)','var(--series-4)','var(--series-5)','var(--series-6)','var(--series-7)','var(--series-8)'];
+const seriesHex = ['#2a78d6','#1baf7a','#eda100','#008300','#4a3aa7','#e34948','#e87ba4','#eb6834'];
+
+document.getElementById('asOf').valueAsDate = new Date();
+function loadSample() {
+  document.getElementById('posInput').value = JSON.stringify(SAMPLE, null, 2);
+  document.getElementById('bp').value = 50000;
+  document.getElementById('vix').value = 22;
+}
+document.getElementById('sampleBtn').addEventListener('click', loadSample);
+
+// ---- Theme toggle: auto -> dark -> light ----
+const themeBtn = document.getElementById('themeBtn');
+const themeLabels = { auto: '\u{1F313} Theme: auto', dark: '\u{1F319} Theme: dark', light: '☀️ Theme: light' };
+// Track our own state: the artifact viewer also stamps data-theme on :root,
+// so reading it back would conflate our choice with the host's.
+let themeState = 'auto';
+try { themeState = localStorage.getItem('opm-theme') || 'auto'; } catch (e) {}
+function applyTheme(t) {
+  themeState = t;
+  if (t === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  themeBtn.innerHTML = themeLabels[t];
+  try { localStorage.setItem('opm-theme', t); } catch (e) {}
+}
+themeBtn.addEventListener('click', () => {
+  const order = ['auto', 'dark', 'light'];
+  applyTheme(order[(order.indexOf(themeState) + 1) % order.length]);
+});
+applyTheme(themeState);
+
+// ---- File upload: JSON or CSV (positions or watchlist, auto-detected) ----
+document.getElementById('uploadBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('uploadWatchBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result).trim();
+    const errEl = document.getElementById('errorMsg');
+    errEl.style.display = 'none';
+    try {
+      // Start from whatever is already loaded so a watchlist upload keeps positions (and vice-versa).
+      let base = {};
+      try { const cur = JSON.parse(document.getElementById('posInput').value || '{}'); base = Array.isArray(cur) ? { positions: cur } : (cur || {}); } catch (e) {}
+      let data;
+      if (text.startsWith('{') || text.startsWith('[')) {
+        const parsed = JSON.parse(text);
+        data = Array.isArray(parsed) ? { positions: parsed, watchlist: [] } : parsed;
+      } else if (isWatchlistCsv(text)) {
+        const asOf = document.getElementById('asOf').valueAsDate || new Date();
+        data = { positions: base.positions || [], watchlist: parseWatchlistCsv(text, asOf) };
+      } else {
+        data = { positions: parseCsv(text), watchlist: base.watchlist || [] };
+      }
+      const hasPos = Array.isArray(data.positions) && data.positions.length > 0;
+      const hasWatch = Array.isArray(data.watchlist) && data.watchlist.length > 0;
+      if (!hasPos && !hasWatch) throw new Error('No positions or watchlist symbols recognized in the file.');
+      document.getElementById('posInput').value = JSON.stringify(data, null, 2);
+      analyze();
+    } catch (e) {
+      errEl.textContent = 'Could not read ' + file.name + ': ' + e.message;
+      errEl.style.display = 'block';
+    }
+  };
+  reader.readAsText(file);
+  ev.target.value = '';
+});
+
+function splitCsvLine(line) {
+  const out = []; let cur = ''; let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') inQ = false;
+      else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length < 2) throw new Error('CSV needs a header row and at least one position row.');
+  const headers = splitCsvLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const col = names => { for (const n of names) { const i = headers.indexOf(n); if (i !== -1) return i; } return -1; };
+  const cSymbol = col(['symbol','instrument','instrumentsymbol']);
+  const cUnderlying = col(['underlyingsymbol','underlying','rootsymbol','root']);
+  const cType = col(['type','callput','callorput','instrumenttype','optiontype','securitytype']);
+  const cQty = col(['quantity','qty','position']);
+  const cStrike = col(['strike','strikeprice']);
+  const cExp = col(['expiration','expirationdate','expdate','expiry','expirydate']);
+  const cOpen = col(['avgopenprice','averageopenprice','openprice','tradeprice','costbasis','averageprice','avgprice']);
+  const cMark = col(['mark','markprice','currentprice','last','lastprice','price']);
+  const cUndPrice = col(['underlyingprice','underlyingmark','stockprice','spotprice']);
+  if (cSymbol === -1 && cUnderlying === -1) throw new Error('No Symbol column found in the header row.');
+
+  const num = v => { if (v == null || v === '') return null; const n = parseFloat(String(v).replace(/[$,()]/g, m => m === '(' ? '-' : m === ')' ? '' : '')); return isNaN(n) ? null : n; };
+  const occ = /^([A-Z.\/]{1,6})\s*(\d{6})([CP])(\d{8})$/;
+
+  return lines.slice(1).map(line => {
+    const f = splitCsvLine(line);
+    const rawSym = (cSymbol !== -1 ? f[cSymbol] : f[cUnderlying]) || '';
+    const qty = num(cQty !== -1 ? f[cQty] : null) ?? 1;
+    const openPx = num(cOpen !== -1 ? f[cOpen] : null);
+    const mark = num(cMark !== -1 ? f[cMark] : null);
+    const undPx = num(cUndPrice !== -1 ? f[cUndPrice] : null);
+    const typeRaw = (cType !== -1 ? f[cType] : '').toLowerCase();
+
+    let symbol = (cUnderlying !== -1 ? f[cUnderlying] : rawSym).replace(/\s.*$/, '');
+    let type = null, strike = num(cStrike !== -1 ? f[cStrike] : null), expiration = cExp !== -1 ? f[cExp] : null;
+
+    const m = rawSym.toUpperCase().replace(/\s+/g, ' ').match(occ);
+    if (m) {
+      symbol = m[1];
+      expiration = '20' + m[2].slice(0,2) + '-' + m[2].slice(2,4) + '-' + m[2].slice(4,6);
+      type = m[3] === 'C' ? 'call' : 'put';
+      strike = parseInt(m[4], 10) / 1000;
+    }
+    if (!type) {
+      if (/call|^c$/.test(typeRaw)) type = 'call';
+      else if (/put|^p$/.test(typeRaw)) type = 'put';
+      else if (/stock|equity|share/.test(typeRaw) || (strike == null && !expiration)) type = 'stock';
+      else if (strike != null) type = 'call'; // has a strike but no C/P info; user can correct in the box
+      else type = 'stock';
+    }
+    if (expiration && /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(expiration)) {
+      const [mm, dd, yy] = expiration.split('/');
+      expiration = (yy.length === 2 ? '20' + yy : yy) + '-' + mm.padStart(2,'0') + '-' + dd.padStart(2,'0');
+    }
+
+    if (type === 'stock') {
+      return { symbol, type: 'stock', qty, costBasis: openPx ?? 0, underlyingPrice: undPx ?? mark ?? 0 };
+    }
+    const side = qty < 0 ? 'short' : 'long';
+    const pos = { symbol, type, side, strike, expiration, qty: Math.abs(qty), currentPrice: mark, underlyingPrice: undPx ?? 0 };
+    if (side === 'short') pos.credit = openPx; else pos.cost = openPx;
+    return pos;
+  });
+}
+
+// A watchlist CSV (e.g. the Tastytrade watchlist export) has no strike/quantity,
+// but carries IV Rank, a star Liquidity rating, an "Earnings At" date and Corr SPY.
+function isWatchlistCsv(text) {
+  const h = (text.split(/\r?\n/)[0] || '').toLowerCase();
+  return /iv\s*rank|liquidity|earnings\s*at/.test(h) && !/quantity|\bstrike\b|expiration/.test(h);
+}
+
+const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+function wlNum(v) {
+  if (v == null) return null;
+  const s = String(v).replace(/[",%<>$]/g, '').trim();
+  if (s === '' || s === '--') return null;
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+function countStars(v) {
+  if (v == null) return null;
+  const s = String(v);
+  const filled = (s.match(/★/g) || []).length;
+  if (filled || /☆/.test(s)) return filled;           // "★★★☆" -> 3
+  const n = wlNum(s); return n != null ? n : null;      // numeric rating fallback
+}
+function earnToDays(v, asOf) {
+  if (v == null) return null;
+  const s = String(v).replace(/[<>]/g, '').trim();
+  if (!s || s === '--') return null;
+  const m = s.toLowerCase().match(/([a-z]{3})[a-z]*\.?\s+(\d{1,2})/);
+  if (!m || !(m[1] in MONTHS)) return null;
+  const today = asOf || new Date();
+  let d = new Date(today.getFullYear(), MONTHS[m[1]], parseInt(m[2], 10));
+  if (d < today) d = new Date(today.getFullYear() + 1, MONTHS[m[1]], parseInt(m[2], 10));
+  return Math.round((d - today) / 86400000);
+}
+
+function parseWatchlistCsv(text, asOf) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length < 2) throw new Error('Watchlist CSV needs a header row and at least one symbol row.');
+  const headers = splitCsvLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const col = names => { for (const n of names) { const i = headers.indexOf(n); if (i !== -1) return i; } return -1; };
+  const cSym = col(['symbol','ticker']);
+  const cPrice = col(['mid','price','last','mark']);
+  const cIvr = col(['ivrank','ivr','impliedvolatilityrank']);
+  const cIv = col(['ividx','iv','impliedvolatility','ivindex']); // raw IV for strike (1σ) estimates
+  const cLiq = col(['liquidity','liquidityrating']);
+  const cEarn = col(['earningsat','earnings','earningsdate']);
+  const cCorr = col(['corrspy','correlation','corr']);
+  const cHigh = col(['52whigh','yearhigh','high52','week52high','fiftytwoweekhigh','52weekhigh']);
+  const cLow = col(['52wlow','yearlow','low52','week52low','fiftytwoweeklow','52weeklow']);
+  if (cSym === -1) throw new Error('No Symbol column found in the watchlist CSV.');
+
+  const out = [];
+  for (const line of lines.slice(1)) {
+    const f = splitCsvLine(line);
+    const sym = (f[cSym] || '').trim();
+    if (!sym || sym.startsWith('/')) continue;          // skip futures roots
+    const price = cPrice !== -1 ? wlNum(f[cPrice]) : null;
+    if (cPrice !== -1 && price == null) continue;        // skip rows with no price (e.g. VIX/NDX "--")
+    out.push({
+      symbol: sym,
+      price,
+      ivr: cIvr !== -1 ? wlNum(f[cIvr]) : null,
+      iv: cIv !== -1 ? wlNum(f[cIv]) : null,
+      liquidity: cLiq !== -1 ? countStars(f[cLiq]) : null,
+      corr: cCorr !== -1 ? wlNum(f[cCorr]) : null,
+      earningsDays: cEarn !== -1 ? earnToDays(f[cEarn], asOf) : null,
+      yearHigh: cHigh !== -1 ? wlNum(f[cHigh]) : null,
+      yearLow: cLow !== -1 ? wlNum(f[cLow]) : null,
+    });
+  }
+  if (!out.length) throw new Error('No screenable symbols found in the watchlist CSV.');
+  return out;
+}
+
+// Data injected by tastytrade_portfolio.py; falls back to the sample demo
+const EMBEDDED = /*__DATA__*/null/*__END__*/;
+if (EMBEDDED && EMBEDDED.data) {
+  document.getElementById('posInput').value = JSON.stringify(EMBEDDED.data, null, 2);
+  if (EMBEDDED.buyingPower) document.getElementById('bp').value = EMBEDDED.buyingPower;
+  if (EMBEDDED.vix) document.getElementById('vix').value = EMBEDDED.vix;
+  if (EMBEDDED.asOf) document.getElementById('asOf').value = EMBEDDED.asOf;
+} else {
+  loadSample();
+}
+
+// 52-week ranges the Python script pre-fetched from the Tastytrade API, keyed by
+// symbol as [low, high]. Lets the raw watchlist CSV (which has no 52-wk columns)
+// still get the near-high/near-low check without any manual editing.
+const RANGES = (EMBEDDED && EMBEDDED.ranges) || {};
+function applyRanges(list) {
+  (list || []).forEach(w => {
+    if (w && typeof w === 'object' && RANGES[w.symbol]) {
+      if (w.yearLow == null) w.yearLow = RANGES[w.symbol][0];
+      if (w.yearHigh == null) w.yearHigh = RANGES[w.symbol][1];
+    }
+  });
+  return list;
+}
+window.addEventListener('DOMContentLoaded', analyze);
+
+function vixDeploymentTarget(vix) {
+  // Pedro's rulebook: /VX <18 → 30%, <20 → 40%, <25 → 45%, ≥25 → 50%.
+  if (vix < 18) return 0.30;
+  if (vix < 20) return 0.40;
+  if (vix < 25) return 0.45;
+  return 0.50;
+}
+document.getElementById('analyzeBtn').addEventListener('click', analyze);
+
+function daysBetween(a, b) { return Math.round((b - a) / 86400000); }
+function fmtMoney(n) { return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, {maximumFractionDigits:0}); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function analyze() {
+  const errEl = document.getElementById('errorMsg');
+  errEl.style.display = 'none';
+  let data;
+  try {
+    const raw = document.getElementById('posInput').value.trim();
+    if (!raw) throw new Error('Paste position data or click "Load sample data" first.');
+    const parsed = JSON.parse(raw);
+    data = Array.isArray(parsed) ? {positions: parsed, watchlist: []} : parsed;
+    if (!Array.isArray(data.positions)) throw new Error('Expected a "positions" array (or a bare array of positions).');
+  } catch (e) {
+    errEl.textContent = 'Could not parse input: ' + e.message;
+    errEl.style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    return;
+  }
+  const asOf = document.getElementById('asOf').valueAsDate || new Date();
+  const bp = parseFloat(document.getElementById('bp').value) || 0;
+  const vixRaw = document.getElementById('vix').value;
+  const vix = vixRaw === '' ? null : parseFloat(vixRaw);
+  const mix = {
+    stock: (parseFloat(document.getElementById('tgtStock').value) || 0) / 100,
+    premium: (parseFloat(document.getElementById('tgtPremium').value) || 0) / 100,
+    moon: (parseFloat(document.getElementById('tgtMoon').value) || 0) / 100,
+  };
+  render(data.positions, applyRanges(data.watchlist || []), asOf, bp, mix, vix);
+}
+
+// ---- Strategy grouping ----
+// Option legs sharing an underlying + expiration are treated as ONE strategy
+// (vertical, strangle, iron condor, ...) so risk, buying power and management
+// are evaluated on the combined structure, not leg by leg. Stock is its own
+// group; a short call covered by held shares has its margin waived.
+function optPrem(l) { return l.credit ?? l.cost ?? 0; }
+function sumQty(legs) { return legs.reduce((s, l) => s + Math.abs(l.qty), 0); }
+function wStrike(legs) { const q = sumQty(legs); return q ? legs.reduce((s, l) => s + l.strike * Math.abs(l.qty), 0) / q : null; }
+
+function sideRisk(legs, type, und, mult) {
+  const m = mult || 100; // equity options = 100; futures options carry their own
+  const sh = legs.filter(l => l.type === type && l.side === 'short');
+  const lo = legs.filter(l => l.type === type && l.side === 'long');
+  if (!sh.length) return { width: 0, defined: true, nakedMargin: 0, shortStrike: null, shortQty: 0, nakedQty: 0 };
+  const shQty = sumQty(sh), loQty = sumQty(lo);
+  const shStrike = wStrike(sh), loStrike = lo.length ? wStrike(lo) : null;
+  const coveredQty = Math.min(shQty, loQty);
+  const nakedQty = shQty - coveredQty;
+  let width = 0;
+  if (loStrike != null && coveredQty > 0) {
+    const w = type === 'put' ? Math.max(0, shStrike - loStrike) : Math.max(0, loStrike - shStrike);
+    width = w * m * coveredQty;
+  }
+  let nakedMargin = 0;
+  if (nakedQty > 0) {
+    const underlyingNotional = und * m * nakedQty;
+    const strikeNotional = shStrike * m * nakedQty;
+    const otm = type === 'put' ? Math.max(0, und - shStrike) : Math.max(0, shStrike - und);
+    nakedMargin = Math.max(0.20 * underlyingNotional - otm * m * nakedQty, 0.10 * strikeNotional);
+  }
+  return { width, defined: nakedQty === 0, nakedMargin, shortStrike: shStrike, shortQty: shQty, nakedQty };
+}
+
+function structureLabel(legs) {
+  if (legs.length === 1) { const l = legs[0]; return `${l.side} ${l.type}`; }
+  const shP = legs.some(l => l.type === 'put' && l.side === 'short');
+  const loP = legs.some(l => l.type === 'put' && l.side === 'long');
+  const shC = legs.some(l => l.type === 'call' && l.side === 'short');
+  const loC = legs.some(l => l.type === 'call' && l.side === 'long');
+  if (shP && loP && shC && loC) return 'Iron condor';
+  if (shP && loP && !shC && !loC) return 'Put vertical';
+  if (shC && loC && !shP && !loP) return 'Call vertical';
+  if (shP && shC && loC && !loP) return 'Jade lizard';
+  if (shP && shC && loP && !loC) return 'Reverse jade lizard';
+  if (shP && shC && !loP && !loC) return 'Short strangle/straddle';
+  if (loP && loC && !shP && !shC) return 'Long strangle/straddle';
+  return `${legs.length}-leg combo`;
+}
+
+function strikesLabel(legs) {
+  return legs.slice().sort((a, b) => a.strike - b.strike)
+    .map(l => `${l.side === 'short' ? '-' : '+'}${l.strike}${l.type === 'call' ? 'C' : 'P'}`).join(' / ');
+}
+
+function makeOptionGroup(legs, asOf, stockShares) {
+  const symbol = legs[0].symbol;
+  const expiration = legs[0].expiration || null;
+  const und = Math.max(0, ...legs.map(l => l.underlyingPrice || 0));
+  const mult = legs[0].multiplier || 100; // contract multiplier (futures options vary)
+  const isFuture = legs.some(l => l.future);
+  const dte = expiration ? daysBetween(asOf, new Date(expiration + 'T00:00:00')) : null;
+  const shorts = legs.filter(l => l.side === 'short');
+  const netCredit = legs.reduce((s, l) => s + (l.side === 'short' ? 1 : -1) * optPrem(l) * mult * Math.abs(l.qty), 0);
+
+  const put = sideRisk(legs, 'put', und, mult);
+  const call = sideRisk(legs, 'call', und, mult);
+
+  // A short call is covered when enough shares are held against it.
+  let covered = false;
+  const heldShares = stockShares[symbol] || 0;
+  if (call.nakedQty > 0 && heldShares >= call.nakedQty * 100) { call.nakedMargin = 0; covered = true; }
+
+  const definedWidth = Math.max(put.width, call.width); // one tested side at a time
+  const nakedMargin = put.nakedMargin + call.nakedMargin;
+
+  let bucket, bpUse, maxLoss;
+  if (netCredit >= 0 && shorts.length) {
+    bucket = 'premium';
+    const spreadLoss = Math.max(0, definedWidth - netCredit);
+    if (put.defined && (call.defined || covered)) {
+      bpUse = spreadLoss > 0 ? spreadLoss : definedWidth;
+      maxLoss = spreadLoss;
+    } else {
+      bpUse = nakedMargin + spreadLoss;
+      maxLoss = null; // undefined risk on the naked side
+    }
+  } else {
+    bucket = 'moon'; // net debit / purely long — capital at risk is the debit paid
+    const debit = Math.max(0, -netCredit);
+    bpUse = debit; maxLoss = debit;
+  }
+
+  return {
+    kind: 'option', symbol, expiration, dte, und, legs, shorts, mult, isFuture,
+    netCredit, bucket, bpUse: Math.max(0, bpUse), maxLoss,
+    definedRisk: maxLoss != null, covered,
+    exposure: Math.max(0, bpUse),
+    structure: (isFuture ? '/ ' : '') + structureLabel(legs),
+    strikes: strikesLabel(legs),
+    contracts: Math.max(...legs.map(l => Math.abs(l.qty))),
+  };
+}
+
+function makeStockGroup(p) {
+  const mult = p.multiplier || 1; // futures carry a point multiplier; equities = 1
+  const notional = p.qty * p.underlyingPrice * mult;
+  return {
+    kind: 'stock', symbol: p.symbol, expiration: null, dte: null, legs: [p], shorts: [],
+    netCredit: 0, bucket: 'stock', bpUse: Math.max(0, notional), maxLoss: null,
+    definedRisk: true, covered: false, exposure: Math.abs(notional), mult, isFuture: !!p.future,
+    structure: p.future ? 'Future' : 'Stock', strikes: '—', contracts: p.qty,
+  };
+}
+
+function buildGroups(positions, asOf) {
+  const stockShares = {};
+  positions.forEach(p => { if (p.type === 'stock') stockShares[p.symbol] = (stockShares[p.symbol] || 0) + p.qty; });
+  const byKey = {};
+  const groups = [];
+  positions.forEach(p => {
+    if (p.type === 'stock') { groups.push(makeStockGroup(p)); return; }
+    const k = p.symbol + '|' + (p.expiration || '');
+    (byKey[k] = byKey[k] || []).push(p);
+  });
+  Object.keys(byKey).forEach(k => groups.push(makeOptionGroup(byKey[k], asOf, stockShares)));
+  return groups;
+}
+
+function classifyGroup(g) {
+  if (g.kind === 'stock') {
+    const p = g.legs[0];
+    const pl = (p.underlyingPrice - p.costBasis) * p.qty * (g.mult || 1);
+    return { status: 'info', note: `Unrealized ${pl >= 0 ? 'gain' : 'loss'} ${fmtMoney(pl)}` };
+  }
+  const dte = g.dte;
+  const hasShort = g.shorts.length > 0;
+  const shortITM = g.shorts.some(l => l.type === 'put' ? g.und < l.strike : g.und > l.strike);
+  const riskTxt = g.definedRisk ? (g.maxLoss > 0 ? `max loss ${fmtMoney(g.maxLoss)}` : 'defined risk') : 'undefined risk';
+
+  let captured = null;
+  if (hasShort && g.netCredit > 0 && g.legs.every(l => l.currentPrice != null)) {
+    const closeCost = g.legs.reduce((s, l) => s + (l.side === 'short' ? 1 : -1) * l.currentPrice * (g.mult || 100) * Math.abs(l.qty), 0);
+    captured = (g.netCredit - closeCost) / g.netCredit;
+  }
+
+  if (hasShort) {
+    if (shortITM && dte != null && dte <= 21 && !g.definedRisk) {
+      return { status: 'critical', note: `Short leg ITM, ${dte} DTE, undefined risk — high assignment/loss risk. Roll or close.` };
+    }
+    if (shortITM && dte != null && dte <= 21) {
+      return { status: 'serious', note: `Short leg ITM, ${dte} DTE — assignment possible; ${riskTxt}. Plan a roll/close.` };
+    }
+    if (shortITM) {
+      return { status: 'serious', note: `Short leg ITM — monitor assignment; ${riskTxt}.` };
+    }
+    if (dte != null && dte <= 7) {
+      return { status: 'warning', note: `${dte} DTE — gamma risk rising, consider closing or rolling.` };
+    }
+    if (captured != null && captured >= 0.5) {
+      return { status: 'good', note: `${Math.round(captured*100)}% of max profit captured — consider closing to de-risk.` };
+    }
+    return { status: 'good', note: captured != null ? `${Math.round(captured*100)}% of max profit — on track, hold. ${g.covered ? 'Covered call.' : riskTxt}.` : `OTM, on track — hold (${riskTxt}).` };
+  }
+  // purely long / debit structure
+  if (dte != null && dte <= 21) {
+    return { status: 'warning', note: `${dte} DTE — time decay accelerating, reassess thesis (${riskTxt}).` };
+  }
+  return { status: 'good', note: `Hold, monitor thesis — no immediate time pressure (${riskTxt}).` };
+}
+
+// ---- Watchlist screening (Pedro's entry rules) ----
+// Liquidity >= 3*, sell premium only when IVR > 30, never into earnings,
+// no long entries near 52-wk highs, short only ETFs near 52-wk lows.
+// Each candidate is scored and given a concrete structure recommendation.
+function normIvr(v) { if (v == null || isNaN(v)) return null; v = Number(v); return v <= 1.5 ? v * 100 : v; }
+
+// Theme map for de-clustering: correlated names share a theme so the screen
+// won't stack them (e.g. both SMH and MU) or pile onto a theme you already hold.
+const THEMES = {
+  'Semiconductors': ['NVDA','AMD','TSM','INTC','MU','SMH','SOXX','SOXL','AVGO','QCOM','ASML','AMAT','MRVL','ARM','MSTR'],
+  'Mega-cap tech': ['AAPL','MSFT','GOOGL','GOOG','META','AMZN'],
+  'EV / Auto': ['TSLA','GM','F','RIVN'],
+  'China / EM': ['FXI','EEM','BABA','KWEB','JD','PDD','BIDU','EWZ'],
+  'Airlines': ['LUV','DAL','UAL','AAL'],
+  'Energy': ['XLE','XOP','USO','OXY','CVX','XOM'],
+  'Materials': ['XLB','AA','FCX','X'],
+  'Financials': ['XLF','JPM','V','MA','BAC','GS'],
+  'Healthcare': ['XLV','XBI','JNJ','PFE','MRK','UNH'],
+  'Staples': ['XLP','WMT','TGT','COST','KO','PG'],
+  'Discretionary': ['NKE','DIS','UBER','SHOP','SBUX'],
+  'Software / Cloud': ['ORCL','CRWV','CRM','SNOW','NET','PLTR','IBM'],
+};
+const SYM_THEME = {};
+Object.entries(THEMES).forEach(([t, syms]) => syms.forEach(s => { SYM_THEME[s] = t; }));
+function themeOf(sym) { return SYM_THEME[sym] || sym; }
+
+// ---- TT-OT strategy engine ----
+// Ports the Tastytrade "new trades" methodology (skill TT-OT) into the dashboard:
+// volatility regime -> directional assumption -> best of the 9 allowed strategies
+// -> ~45 DTE, concrete strikes at ~16Δ (1σ) / ~30Δ (½σ), sizing and a management
+// plan. Pedro's rules win over TT defaults (IVR>30, no earnings, no longs near
+// highs, short only ETFs, prefer defined risk / undefined only with loose BP).
+function normIv(v) { if (v == null || isNaN(v)) return null; v = Number(v); return v > 1.5 ? v / 100 : v; }
+function roundStrike(price, x) {
+  if (x == null || isNaN(x)) return null;
+  const step = price >= 200 ? 5 : price >= 50 ? 1 : 0.5;
+  return Math.round(x / step) * step;
+}
+function fmtStk(x) { return x == null ? '?' : (Math.round(x * 100) / 100).toString(); }
+
+// The 9 allowed strategies, chosen mechanically. c = {price, ivr, iv(fraction|null),
+// isEtf, nearHigh, nearLow, bp}. Returns {strategy, assumption, rec, plan[]}.
+function pickTastyStrategy(c) {
+  const P = c.price;
+  const sig = (P != null && c.iv != null) ? P * c.iv * Math.sqrt(45 / 365) : null; // 1σ @45 DTE
+  const half = sig != null ? sig * 0.5 : null;                                     // ~30Δ proxy
+  const strongIv = c.ivr != null && c.ivr > 50;
+  const step = P != null ? (P >= 200 ? 5 : P >= 50 ? 1 : 0.5) : 1;
+  const width = sig != null ? Math.max(roundStrike(P, sig), step) : null;          // ~1σ wing
+
+  // "Trade small": short-strangle BPR ≈ 18% of notional; undefined risk allowed
+  // only when that fits in ≤10% of total BP (loose BP). Unknown BP -> prefer defined.
+  const strangleBpr = P != null ? P * 100 * 0.18 : null;
+  const bpLoose = (c.bp && strangleBpr != null) ? (strangleBpr <= 0.10 * c.bp) : false;
+
+  // Directional assumption — neutral by default (TT), constrained by Pedro's rules.
+  let assumption;
+  if (c.nearHigh) assumption = 'Neutro / baixista (perto de máx.)';
+  else if (c.nearLow && !c.isEtf) assumption = 'Bullish (perto de mín., só CSP defensiva)';
+  else if (c.nearLow && c.isEtf) assumption = 'Neutro (ETF em mín., reversão)';
+  else assumption = 'Neutro';
+
+  const sP16 = sig != null ? roundStrike(P, P - sig) : null;   // 16Δ put
+  const sC16 = sig != null ? roundStrike(P, P + sig) : null;   // 16Δ call
+  const sP30 = half != null ? roundStrike(P, P - half) : null; // 30Δ put
+  const sC30 = half != null ? roundStrike(P, P + half) : null; // 30Δ call
+
+  const mgmtDef = 'Fechar a 50% do crédito · 21 DTE fechar/rolar a crédito · risco definido: NÃO ajustar · IVR<20 fechar';
+  const mgmtUndef = 'Fechar a 50% do crédito · 21 DTE fechar/rolar a crédito · defender lado testado (rolar a crédito) · IVR<20 fechar';
+
+  let strategy, structure, pop, risk, mgmt, defined, alt = null;
+
+  if (c.nearHigh && c.isEtf) {
+    strategy = 'Call Credit Spread'; defined = true;
+    structure = sig != null ? `Sell ${fmtStk(sC30)} C (~30Δ) / Buy ${fmtStk(roundStrike(P, sC30 + width))} C` : 'Sell ~30Δ call / Buy asa 1σ acima';
+    pop = '~65-70%'; risk = 'Definido'; mgmt = mgmtDef;
+  } else if (c.nearHigh) {
+    strategy = 'Iron Condor'; defined = true;
+    structure = sig != null ? `Sell ${fmtStk(sP16)} P / Buy ${fmtStk(roundStrike(P, sP16 - width))} P  +  Sell ${fmtStk(sC16)} C / Buy ${fmtStk(roundStrike(P, sC16 + width))} C` : 'Puts+calls 16Δ, asas ~1σ';
+    pop = '~60-65%'; risk = 'Definido'; mgmt = mgmtDef;
+    alt = 'Se skew de puts caro: Jade Lizard (sem risco em cima).';
+  } else if (c.nearLow && !c.isEtf) {
+    if (bpLoose) {
+      strategy = 'Short Put (cash-secured)'; defined = false;
+      structure = sig != null ? `Sell ${fmtStk(sP30)} P (~30Δ, CSP)` : 'Sell ~30Δ put (CSP)';
+      pop = '~65-70%'; risk = 'Indefinido (buffer do crédito)'; mgmt = mgmtUndef;
+      alt = 'Conservador: Put Credit Spread (risco definido).';
+    } else {
+      strategy = 'Put Credit Spread'; defined = true;
+      structure = sig != null ? `Sell ${fmtStk(sP30)} P (~30Δ) / Buy ${fmtStk(roundStrike(P, sP30 - width))} P` : 'Sell ~30Δ put / Buy asa 1σ abaixo';
+      pop = '~65-70%'; risk = 'Definido'; mgmt = mgmtDef;
+    }
+  } else {
+    // mid-range (or ETF near low) — neutral default
+    if (strongIv && bpLoose) {
+      strategy = 'Short Strangle'; defined = false;
+      structure = sig != null ? `Sell ${fmtStk(sP16)} P (16Δ) / Sell ${fmtStk(sC16)} C (16Δ)` : 'Sell 16Δ put + 16Δ call';
+      pop = '~70%'; risk = 'Indefinido'; mgmt = mgmtUndef;
+      alt = 'Se BP apertar: Iron Condor (mesmos 16Δ, risco definido).';
+    } else {
+      strategy = 'Iron Condor'; defined = true;
+      structure = sig != null ? `Sell ${fmtStk(sP16)} P / Buy ${fmtStk(roundStrike(P, sP16 - width))} P  +  Sell ${fmtStk(sC16)} C / Buy ${fmtStk(roundStrike(P, sC16 + width))} C` : 'Puts+calls 16Δ, asas ~1σ';
+      pop = '~60-65%'; risk = 'Definido'; mgmt = mgmtDef;
+      alt = strongIv ? 'Neutro-a-alta, se skew de puts caro: Jade Lizard ou Broken Wing Butterfly (put).' : null;
+    }
+  }
+
+  const bpr = defined ? (width != null ? width * 100 * 0.7 : null) : strangleBpr;
+  let sizing = '1 contrato (trade small)';
+  if (c.bp && bpr != null) {
+    const pct = 100 * bpr / c.bp;
+    sizing = `1 contrato · BPR ~${Math.round(bpr)}$ (${pct < 1 ? '<1' : '~' + Math.round(pct)}% do BP)`;
+  }
+
+  const plan = [
+    { k: 'Assunção', v: assumption },
+    { k: 'Ciclo', v: '~45 DTE (30-60)' },
+    { k: 'Estrutura', v: structure },
+    { k: 'POP / Risco', v: `${pop} · ${risk}` },
+    { k: 'Sizing', v: sizing },
+    { k: 'Gestão', v: mgmt },
+  ];
+  if (alt) plan.push({ k: 'Alternativa', v: alt });
+  if (c.iv == null) plan.push({ k: '⚠ IV', v: 'Sem IV bruta no CSV — strikes por confirmar (adiciona a coluna "IV Idx").' });
+
+  return { strategy, assumption, rec: `${strategy} · ${assumption}`, plan };
+}
+
+// fit = { riskBySymbol, totalRisk, premiumUnder } — the analyzed portfolio, so
+// candidates that diversify (low |Corr SPY|, not already a concentration) and
+// fill an under-target premium bucket score higher: "best fit to portfolio".
+function screenWatchlist(watchlist, heldSymbols, fit) {
+  const DTE_WINDOW = 45; // earnings must fall outside the trade's expected life
+  const F = fit || {};
+  // /VX regime tilt (the value Pedro types) actually reorders candidates:
+  //  low /VX  -> reward individual high IVR more (idiosyncratic opportunities);
+  //  high /VX -> dampen the IVR edge, reward diversification (broad vol, corr rises).
+  const vx = (F.vix != null && !isNaN(F.vix)) ? Number(F.vix) : null;
+  const vxTilt = vx != null ? Math.max(-1, Math.min(1, (20 - vx) / 8)) : 0;
+  return (watchlist || []).map(w0 => {
+    const w = typeof w0 === 'string' ? { symbol: w0 } : (w0 || {});
+    if (!w.symbol) return null;
+    const ivr = normIvr(w.ivr);
+    const liq = w.liquidity != null ? Number(w.liquidity) : null;
+    const price = w.price != null ? Number(w.price) : null;
+    const earn = w.earningsDays != null && w.earningsDays !== '' ? Number(w.earningsDays) : null;
+    const corr = w.corr != null && w.corr !== '' && !isNaN(w.corr) ? Number(w.corr) : null;
+    const isEtf = w.etf === true || String(w.type || '').toLowerCase() === 'etf';
+    const yHigh = w.yearHigh != null ? Number(w.yearHigh) : null;
+    const yLow = w.yearLow != null ? Number(w.yearLow) : null;
+    const nearHigh = (price != null && yHigh) ? price >= yHigh * 0.90 : null;
+    const nearLow = (price != null && yLow) ? price <= yLow * 1.10 : null;
+
+    const checks = [];
+    let blocked = false, score = 0;
+
+    if (liq != null) { const ok = liq >= 3; checks.push({ k: 'Liquidez', ok, txt: liq + '★' }); if (!ok) blocked = true; score += ok ? liq : 0; }
+    else checks.push({ k: 'Liquidez', ok: null, txt: '?' });
+
+    if (earn != null) { const ok = earn > DTE_WINDOW; checks.push({ k: 'Earnings', ok, txt: earn + 'd' }); if (!ok) blocked = true; }
+    else checks.push({ k: 'Earnings', ok: null, txt: '?' });
+
+    let canSell = null;
+    if (ivr != null) { canSell = ivr > 30; checks.push({ k: 'IVR', ok: canSell, txt: Math.round(ivr) }); score += canSell ? (ivr / 5) * (1 + 0.25 * vxTilt) : 0; }
+    else checks.push({ k: 'IVR', ok: null, txt: '?' });
+
+    if (nearHigh != null) checks.push({ k: 'Range', ok: !nearHigh, txt: nearHigh ? 'perto máx' : (nearLow ? 'perto mín' : 'meio') });
+    if (isEtf) checks.push({ k: 'ETF', ok: true, txt: 'sim' });
+
+    // Diversification: prefer low absolute correlation to SPY.
+    if (corr != null) {
+      const divers = Math.abs(corr) <= 0.4;
+      checks.push({ k: 'Corr', ok: divers ? true : null, txt: corr.toFixed(2) });
+      score += (1 - Math.min(1, Math.abs(corr))) * 4 * (1 - 0.3 * vxTilt);
+    }
+
+    let strategy, rec, plan = null, assumption = null;
+    if (blocked) {
+      strategy = 'Bloqueado';
+      rec = 'Não cumpre os filtros de entrada (ver marcas abaixo).';
+    } else if (canSell === false) {
+      strategy = 'Aguardar';
+      rec = `IVR ${Math.round(ivr)} ≤ 30 — sem venda de premium (TT-OT). Vigiar expansão de IV.`;
+    } else {
+      // Best of the 9 strategies, per the TT-OT methodology.
+      const pick = pickTastyStrategy({
+        price, ivr, iv: normIv(w.iv), isEtf, nearHigh, nearLow, bp: (F.bp != null ? Number(F.bp) : null),
+      });
+      strategy = pick.strategy; rec = pick.rec; plan = pick.plan; assumption = pick.assumption;
+      score += 5;
+      if (nearHigh === false && nearLow === false) score += 3;
+      if (ivr != null && ivr > 50) score += 3; // strong IV regime — TT preference
+
+      // Portfolio fit: penalize adding to a symbol OR theme the book already
+      // leans on; reward genuine diversifiers.
+      const theme = themeOf(w.symbol);
+      const symShare = (F.riskBySymbol && F.totalRisk) ? (F.riskBySymbol[w.symbol] || 0) / F.totalRisk : 0;
+      const themeShare = (F.riskByTheme && F.totalRisk) ? (F.riskByTheme[theme] || 0) / F.totalRisk : 0;
+      if (symShare >= 0.15 || themeShare >= 0.20) {
+        score -= 6;
+        const worst = Math.max(symShare, themeShare);
+        checks.push({ k: 'Conc.', ok: false, txt: Math.round(worst*100) + '% já' });
+      } else {
+        score += 3;
+      }
+      if (F.premiumUnder) score += 2; // helps fill an under-target premium bucket
+    }
+
+    return { symbol: w.symbol, theme: themeOf(w.symbol), list: w.list || null, held: heldSymbols.has(w.symbol), blocked, score, strategy, rec, plan, assumption, checks, corr };
+  }).filter(Boolean);
+}
+
+const statusIcon = { critical: '&#9679;', serious: '&#9679;', warning: '&#9679;', good: '&#10003;', info: '&#8226;' };
+const statusLabel = { critical: 'Critical', serious: 'Serious', warning: 'Watch', good: 'On track', info: 'Info' };
+
+function render(positions, watchlist, asOf, bp, mix, vix) {
+  document.getElementById('results').style.display = 'block';
+
+  // Legs are grouped into strategies; every metric below is per-strategy.
+  const groups = buildGroups(positions, asOf).map(g => ({ ...g, ...classifyGroup(g) }));
+  const optionGroups = groups.filter(g => g.kind === 'option');
+
+  // ---- Tiles ----
+  const critCount = groups.filter(g => g.status === 'critical').length;
+  const warnCount = groups.filter(g => g.status === 'warning' || g.status === 'serious').length;
+  const netCredit = groups.reduce((sum, g) => sum + g.netCredit, 0);
+  const nearestDte = optionGroups.length ? Math.min(...optionGroups.map(g => g.dte).filter(d => d != null)) : null;
+
+  document.getElementById('tiles').innerHTML = `
+    <div class="tile"><div class="value">${groups.length}</div><div class="label">Strategies (${positions.length} legs)</div></div>
+    <div class="tile"><div class="value ${netCredit>=0?'good':'crit'}">${fmtMoney(netCredit)}</div><div class="label">Net premium (open)</div></div>
+    <div class="tile"><div class="value ${critCount>0?'crit':(warnCount>0?'warn':'good')}">${critCount + warnCount}</div><div class="label">Strategies needing attention</div></div>
+    <div class="tile"><div class="value">${nearestDte ?? '—'}</div><div class="label">Nearest expiration (DTE)</div></div>
+  `;
+
+  // ---- Buying power allocation vs target (per strategy) ----
+  const bpUsed = { stock: 0, premium: 0, moon: 0 };
+  groups.forEach(g => { bpUsed[g.bucket] += g.bpUse; });
+
+  const totalDeployed = bpUsed.stock + bpUsed.premium + bpUsed.moon;
+  const deploymentTarget = vix != null && !isNaN(vix) ? vixDeploymentTarget(vix) : null;
+
+  const bpPanel = document.getElementById('bpPanel');
+  const bucketGaps = [];
+  if (bp > 0 && deploymentTarget != null) {
+    bpPanel.style.display = 'block';
+    document.getElementById('bpSubtitle').textContent =
+      `/VX ${vix} → target total deployment ${Math.round(deploymentTarget*100)}% of buying power. The mix below splits that deployed amount 40/50/10 (editable).`;
+
+    const rows2 = [
+      { key: 'deployed', label: 'Total deployed', color: 'var(--baseline)', actual: totalDeployed / bp, target: deploymentTarget },
+      { key: 'stock', label: 'Stock', color: seriesColors[0], actual: bpUsed.stock / bp, target: mix.stock * deploymentTarget },
+      { key: 'premium', label: 'Premium selling', color: seriesColors[1], actual: bpUsed.premium / bp, target: mix.premium * deploymentTarget },
+      { key: 'moon', label: 'Moon shots', color: seriesColors[2], actual: bpUsed.moon / bp, target: mix.moon * deploymentTarget },
+    ];
+    document.getElementById('bpChart').innerHTML = rows2.map(b => {
+      const diff = b.actual - b.target;
+      if (b.key !== 'deployed') bucketGaps.push({ ...b, diff, dollarGap: Math.abs(diff) * bp });
+      let badge;
+      if (Math.abs(diff) < 0.05) badge = `<span class="badge good">${statusIcon.good} On target</span>`;
+      else if (diff > 0) badge = `<span class="badge warning">&#9679; ${Math.round(diff*100)}pt over</span>`;
+      else badge = `<span class="badge info">${Math.round(-diff*100)}pt under</span>`;
+      return `<div class="bullet-row">
+        <div class="bullet-label">${b.label}</div>
+        <div class="bullet-track">
+          <div class="bullet-fill" style="width:${Math.min(100, b.actual*100).toFixed(1)}%;background:${b.color}"></div>
+          <div class="bullet-target" style="left:${Math.min(100, b.target*100).toFixed(1)}%"></div>
+        </div>
+        <div class="bullet-value">${Math.round(b.actual*100)}% <span style="color:var(--text-muted)">(target ${Math.round(b.target*100)}%)</span> ${badge}</div>
+      </div>`;
+    }).join('');
+  } else {
+    bpPanel.style.display = 'none';
+  }
+
+  // ---- Capital-at-risk chart (per underlying) ----
+  const riskBySymbol = {};
+  groups.forEach(g => { riskBySymbol[g.symbol] = (riskBySymbol[g.symbol] || 0) + g.exposure; });
+  const symbols = Object.keys(riskBySymbol).sort((a,b) => riskBySymbol[b]-riskBySymbol[a]);
+  const totalNotional = symbols.reduce((s,k) => s + riskBySymbol[k], 0) || 1;
+  const maxNotional = Math.max(...symbols.map(s => riskBySymbol[s]), 1);
+  document.getElementById('allocChart').innerHTML = symbols.map((s, i) => {
+    const color = seriesColors[i % seriesColors.length];
+    const val = riskBySymbol[s];
+    return `<div class="bar-row">
+      <div class="bar-label">${esc(s)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(val/maxNotional*100).toFixed(1)}%;background:${color}"></div></div>
+      <div class="bar-value">${fmtMoney(val)}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('allocLegend').innerHTML = symbols.map((s,i) =>
+    `<div class="legend-item"><span class="swatch" style="background:${seriesColors[i%seriesColors.length]}"></span>${esc(s)} (${Math.round(riskBySymbol[s]/totalNotional*100)}%)</div>`
+  ).join('');
+
+  const concEl = symbols[0];
+  const concShare = concEl ? riskBySymbol[concEl] / totalNotional : 0;
+
+  // ---- DTE chart (one bar per strategy) ----
+  const dteRows = optionGroups.filter(g => g.dte != null).slice().sort((a,b) => a.dte - b.dte);
+  const maxDte = Math.max(...dteRows.map(g => g.dte), 1);
+  const statusColorVar = { critical: 'var(--critical)', serious: 'var(--serious)', warning: 'var(--warning)', good: 'var(--good)' };
+  document.getElementById('dteChart').innerHTML = dteRows.map(g => {
+    return `<div class="bar-row">
+      <div class="bar-label">${esc(g.symbol)} ${esc(g.structure)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max(3,(g.dte/maxDte*100)).toFixed(1)}%;background:${statusColorVar[g.status]||'var(--good)'}"></div></div>
+      <div class="bar-value">${g.dte}d</div>
+    </div>`;
+  }).join('') || '<div class="empty">No option positions.</div>';
+  document.getElementById('dteLegend').innerHTML = ['critical','serious','warning','good'].map(s =>
+    `<div class="legend-item"><span class="swatch" style="background:${statusColorVar[s]}"></span>${statusLabel[s]}</div>`
+  ).join('');
+
+  // ---- Positions table (one row per strategy) ----
+  document.getElementById('posTableBody').innerHTML = groups.map(g => `
+    <tr>
+      <td><span class="badge ${g.status}">${statusIcon[g.status]} ${statusLabel[g.status]}</span></td>
+      <td>${esc(g.symbol)}</td>
+      <td>${esc(g.structure)}${g.covered ? ' <span class="badge info">covered</span>' : ''}</td>
+      <td class="num">${esc(g.strikes)}</td>
+      <td>${g.expiration || '—'}</td>
+      <td class="num">${g.dte ?? '—'}</td>
+      <td class="num">${g.contracts}</td>
+      <td>${esc(g.note)}</td>
+    </tr>
+  `).join('');
+
+  // ---- Management actions ----
+  const actionable = groups.filter(g => ['critical','serious','warning'].includes(g.status))
+    .sort((a,b) => ({critical:0,serious:1,warning:2}[a.status] - ({critical:0,serious:1,warning:2}[b.status])));
+  let actionsHtml = actionable.map(g => `
+    <div class="action-card">
+      <div class="icon">${g.status==='critical'?'&#128721;':g.status==='serious'?'&#9888;&#65039;':'&#8987;'}</div>
+      <div class="body"><strong>${esc(g.symbol)} ${esc(g.structure)}${g.kind!=='stock'?` ${esc(g.strikes)} ${g.expiration}`:''}</strong>
+      <p>${esc(g.note)}</p></div>
+    </div>
+  `).join('');
+  if (concShare >= 0.35) {
+    actionsHtml += `<div class="action-card">
+      <div class="icon">&#9888;&#65039;</div>
+      <div class="body"><strong>Concentration risk — ${esc(concEl)}</strong>
+      <p>${Math.round(concShare*100)}% of capital at risk sits in a single underlying. Consider directing new capital elsewhere until this is more balanced.</p></div>
+    </div>`;
+  }
+  const overBuckets = bucketGaps.filter(g => g.diff >= 0.05).sort((a,b) => b.diff - a.diff);
+  overBuckets.forEach(g => {
+    actionsHtml += `<div class="action-card">
+      <div class="icon">&#9888;&#65039;</div>
+      <div class="body"><strong>${esc(g.label)} is ${Math.round(g.diff*100)} pts over target</strong>
+      <p>Currently ${Math.round(g.actual*100)}% of buying power vs. a ${Math.round(g.target*100)}% target — consider trimming roughly ${fmtMoney(g.dollarGap)} to get back in line.</p></div>
+    </div>`;
+  });
+  document.getElementById('actionsList').innerHTML = actionsHtml || '<div class="empty">No positions currently flagged — portfolio looks on track.</div>';
+
+  // ---- New trade ideas ----
+  const heldSymbols = new Set(groups.map(g => g.symbol));
+  const stockByShort = {};
+  groups.forEach(g => { if (g.kind === 'stock') stockByShort[g.symbol] = (stockByShort[g.symbol] || 0) + g.legs[0].qty; });
+  const shortCallSymbols = new Set(
+    groups.flatMap(g => g.legs).filter(l => l.type === 'call' && l.side === 'short').map(l => l.symbol)
+  );
+
+  let ideas = [];
+  const underBuckets = bucketGaps.filter(g => g.diff <= -0.05).sort((a,b) => a.diff - b.diff);
+  underBuckets.forEach(g => {
+    const suggestion = {
+      stock: `Room to add ~${fmtMoney(g.dollarGap)} of stock (buy-and-hold or shares to write covered calls against) to reach the ${Math.round(g.target*100)}% target.`,
+      premium: `Room for ~${fmtMoney(g.dollarGap)} more in short premium (cash-secured puts, covered calls, credit spreads) to reach the ${Math.round(g.target*100)}% target.`,
+      moon: `Room for ~${fmtMoney(g.dollarGap)} of speculative long-option plays to reach the ${Math.round(g.target*100)}% target — small, defined-risk size given the speculative nature.`,
+    }[g.key];
+    ideas.push({ title: `${g.label} is ${Math.round(-g.diff*100)} pts under target`, body: suggestion });
+  });
+  Object.keys(stockByShort).forEach(sym => {
+    if (stockByShort[sym] >= 100 && !shortCallSymbols.has(sym)) {
+      ideas.push({ title: `Sell a covered call on ${sym}`, body: `You hold ${stockByShort[sym]} shares with no short call against it. A ~30-45 DTE, 20-30 delta call would generate income against the existing position.` });
+    }
+  });
+  if (concShare < 0.35 && ideas.length === 0 && (!watchlist || watchlist.length === 0)) {
+    ideas.push({ title: 'Portfolio looks balanced', body: 'No obvious gaps from the current data. Add tickers (or enriched objects) to the watchlist field to get screened candidates.' });
+  }
+
+  // ---- Watchlist candidates, scored for portfolio fit and ranked ----
+  // "Go look for trades": screen the watchlist against the rules, then rank by
+  // potential (IVR + liquidity + diversification + fit to the analyzed book).
+  const riskByTheme = {};
+  groups.forEach(g => { const t = themeOf(g.symbol); riskByTheme[t] = (riskByTheme[t] || 0) + g.exposure; });
+  const fit = {
+    riskBySymbol,
+    riskByTheme,
+    totalRisk: totalNotional,
+    bp,
+    vix,
+    premiumUnder: bucketGaps.some(g => g.key === 'premium' && g.diff <= -0.05),
+  };
+  const scored = screenWatchlist(watchlist, heldSymbols, fit);
+  const tradeable = scored.filter(c => !c.blocked && !c.held).sort((a, b) => b.score - a.score);
+
+  // Top 8: soft de-cluster — allow up to 2 per theme so two high-IVR names in the
+  // same sector (e.g. SMH + MU) aren't hidden — then fill remaining slots by score.
+  const TOP_N = 8, PER_THEME = 2;
+  const top = [], themeCount = {};
+  for (const c of tradeable) { if (top.length >= TOP_N) break; if ((themeCount[c.theme] || 0) >= PER_THEME) continue; top.push(c); themeCount[c.theme] = (themeCount[c.theme] || 0) + 1; }
+  if (top.length < TOP_N) for (const c of tradeable) { if (top.length >= TOP_N) break; if (!top.includes(c)) top.push(c); }
+  const rest = scored.filter(c => !top.includes(c))
+    .sort((a, b) => (a.held - b.held) || (a.blocked - b.blocked) || (b.score - a.score));
+
+  const checkBadge = c => `<span class="badge ${c.ok === true ? 'good' : c.ok === false ? 'critical' : 'info'}">${esc(c.k)}: ${esc(String(c.txt))}</span>`;
+  const card = (c, rank) => `
+    <div class="idea-card">
+      <strong>${rank ? `#${rank} · ` : ''}${esc(c.symbol)} — ${esc(c.strategy)}</strong>
+      ${rank ? `<span class="badge good">potencial ${Math.round(c.score)}</span>` : ''}
+      ${c.theme && c.theme !== c.symbol ? `<span class="badge info">${esc(c.theme)}</span>` : ''}
+      ${c.list ? `<span class="badge info">${esc(c.list)}</span>` : ''}
+      ${c.held ? '<span class="badge warning">já em carteira</span>' : ''}
+      ${c.blocked ? '<span class="badge critical">bloqueado</span>' : ''}
+      ${c.plan
+        ? `<div style="margin-top:6px;font-size:0.85rem;line-height:1.55">${c.plan.map(p => `<div><strong style="color:var(--text-secondary)">${esc(p.k)}:</strong> ${esc(p.v)}</div>`).join('')}</div>`
+        : `<p>${esc(c.rec)}</p>`}
+      <div class="legend" style="margin-top:8px">${c.checks.map(checkBadge).join('')}</div>
+    </div>`;
+  const topHtml = top.map((c, i) => card(c, i + 1)).join('');
+  const restHtml = rest.map(c => card(c, 0)).join('');
+  const gapHtml = ideas.map(i => `
+    <div class="idea-card"><strong>${esc(i.title)}</strong><p>${esc(i.body)}</p></div>
+  `).join('');
+
+  const vxReg = (vix == null || isNaN(vix)) ? '/VX —'
+    : vix < 18 ? `/VX ${vix} · baixo → foco em IVR individual alta`
+    : vix < 25 ? `/VX ${vix} · médio`
+    : `/VX ${vix} · alto → foco em diversificação`;
+  const noWatch = scored.length === 0;
+  const cta = noWatch
+    ? `<div class="disclaimer" style="border-left-color:var(--series-1);margin-bottom:14px">
+         <strong>No watchlist loaded.</strong> Click <strong>&#128228; Upload watchlist CSV</strong> above and drop your watchlist export
+         (e.g. WhatchList_Main.csv) to screen it against your positions and get the Top 8 trade candidates.
+       </div>` : '';
+
+  document.getElementById('ideasList').innerHTML =
+    cta +
+    (top.length ? `<h3>Top ${top.length} — melhores trades por potencial <span style="font-weight:400;color:var(--text-secondary)">(${esc(vxReg)})</span></h3>${topHtml}` : '') +
+    (rest.length ? `<details style="margin-top:10px"><summary>Restantes ${rest.length} símbolos da watchlist (bloqueados / menor potencial / já em carteira)</summary>${restHtml}</details>` : '') +
+    (ideas.length ? `<h3 style="margin-top:14px">Portfolio gaps</h3>${gapHtml}` : '') ||
+    '<div class="empty">Upload a watchlist CSV to get trade candidates.</div>';
+}
+</script>
+</body>
+</html>
