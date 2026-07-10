@@ -289,13 +289,20 @@ def build_positions(token, acct):
     return positions
 
 
-def fetch_buying_power(token, acct):
+def fetch_balances(token, acct):
+    """Return (net_liq, option_bp, stock_bp) from the account balances.
+
+    option_bp = derivative buying power (available for options);
+    stock_bp  = equity buying power (available for stock, ~2x net liq on Reg-T).
+    Total capital deployed is net_liq - option_bp (the broker's BP usage).
+    """
     resp = api("GET", f"/accounts/{acct}/balances", token=token)
     d = resp["data"]
-    bp = num(d.get("derivative-buying-power")) or num(d.get("equity-buying-power"))
-    nlv = num(d.get("net-liquidating-value"))
-    print(f"  Buying power: {bp}   Net liq: {nlv}")
-    return bp
+    net_liq = num(d.get("net-liquidating-value"))
+    option_bp = num(d.get("derivative-buying-power"))
+    stock_bp = num(d.get("equity-buying-power"))
+    print(f"  Net liq: {net_liq}   Option BP: {option_bp}   Stock BP: {stock_bp}")
+    return net_liq, option_bp, stock_bp
 
 
 def chunks(seq, n=90):
@@ -409,7 +416,7 @@ def main():
     print("Fetching positions...")
     positions = build_positions(token, acct)
     print(f"  {len(positions)} positions mapped.")
-    bp = fetch_buying_power(token, acct)
+    net_liq, option_bp, stock_bp = fetch_balances(token, acct)
 
     # The API supplies positions + buying power; you upload your watchlist CSV in
     # the dashboard. That raw export has no 52-week columns, so pre-fetch the
@@ -424,7 +431,9 @@ def main():
     vix = input("/VX level (Enter to set later in the dashboard): ").strip()
     payload = {
         "data": {"positions": positions, "watchlist": []},
-        "buyingPower": bp,
+        "netLiq": net_liq,
+        "optionBp": option_bp,
+        "stockBp": stock_bp,
         "vix": float(vix) if vix else None,
         "asOf": date.today().isoformat(),
         "ranges": ranges,

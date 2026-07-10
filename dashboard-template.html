@@ -206,8 +206,12 @@ details summary { cursor: pointer; font-size: 0.8rem; color: var(--text-secondar
     <div class="row">
       <label for="asOf">As of date</label>
       <input type="date" id="asOf">
-      <label for="bp">Total buying power</label>
-      <input type="number" class="bp" id="bp" placeholder="e.g. 50000" min="0" step="100">
+      <label for="netLiq">Net Liq</label>
+      <input type="number" class="bp" id="netLiq" placeholder="e.g. 42200" min="0" step="100">
+      <label for="optionBp">Option BP</label>
+      <input type="number" class="bp" id="optionBp" placeholder="e.g. 33700" min="0" step="100">
+      <label for="stockBp">Stock BP</label>
+      <input type="number" class="bp" id="stockBp" placeholder="e.g. 67400" min="0" step="100">
       <label for="vix">/VX level</label>
       <input type="number" class="pct" id="vix" placeholder="e.g. 22" min="0" step="0.1">
       <button id="analyzeBtn">Analyze portfolio</button>
@@ -228,7 +232,7 @@ details summary { cursor: pointer; font-size: 0.8rem; color: var(--text-secondar
         Stock: <code>{symbol, type:"stock", qty, costBasis, underlyingPrice}</code>.
         Optional <code>watchlist</code> array for candidate screening: bare tickers <code>["AMD","COST"]</code>, or enriched objects <code>{symbol, list, price, ivr, liquidity (1-4★), beta, earningsDays, yearHigh, yearLow, etf}</code>. Each candidate is scored against the entry rules (liquidity ≥3★, IVR&gt;30 to sell premium, no earnings within 45 DTE, no long near 52-wk highs, short only ETFs near lows) and given a structure recommendation; missing fields show as "?" and are flagged to confirm manually.
         Strategy grouping: option legs sharing an underlying and expiration are analyzed as one strategy (vertical, strangle, iron condor, …), so risk and buying power reflect the combined structure — a defined-risk spread uses width − net credit, not naked margin on each leg; a short call covered by held shares waives its margin.
-        Buying-power bucketing: stock = market value; premium selling = net-credit structures with a short leg (defined-risk = width − credit; naked = ~20% of underlying notional, a rough Reg-T-style estimate, not your broker's figure); moon shots = net-debit / long-only structures, capital = debit paid.
+        Deployment: <strong>Total deployed = Net Liq − Option BP</strong> (equals your broker's BP Usage), shown as a % of Net Liq. Per-bucket = estimated BP used ÷ Net Liq. Buckets: stock = ~50% Reg-T margin of market value; premium selling = net-credit structures with a short leg (defined-risk = width − credit; naked = ~20% of underlying notional, a rough Reg-T-style estimate, not your broker's figure); moon shots = net-debit / long-only structures, capital = debit paid.
         Total deployment cap is set by /VX (rulebook): ≥25 → deploy up to 50% of total buying power; 20-25 → 45%; 18-20 → 40%; below 18 → 30%. The stock/premium/moon-shot mix percentages above apply to that deployed (allocated) portion, not total buying power.
         CSV upload: a header row plus columns like Symbol, Type (call/put/stock), Quantity (negative = short), Strike, Expiration, Price/Avg Open Price, Mark, Underlying Price. OCC option symbols (e.g. "AAPL 260711P00180000") are decoded automatically. The parsed result lands in the box above for review — nothing leaves this page.
       </div>
@@ -311,7 +315,11 @@ const seriesHex = ['#2a78d6','#1baf7a','#eda100','#008300','#4a3aa7','#e34948','
 document.getElementById('asOf').valueAsDate = new Date();
 function loadSample() {
   document.getElementById('posInput').value = JSON.stringify(SAMPLE, null, 2);
-  document.getElementById('bp').value = 50000;
+  // Sample account chosen so deployed (Net Liq − Option BP ≈ $48k) reconciles
+  // with the sample positions' estimated bucket BP (stock 20k + premium 26.5k + moon 1.5k).
+  document.getElementById('netLiq').value = 100000;
+  document.getElementById('optionBp').value = 52000;
+  document.getElementById('stockBp').value = 190000;
   document.getElementById('vix').value = 22;
 }
 document.getElementById('sampleBtn').addEventListener('click', loadSample);
@@ -528,7 +536,9 @@ function parseWatchlistCsv(text, asOf) {
 const EMBEDDED = /*__DATA__*/null/*__END__*/;
 if (EMBEDDED && EMBEDDED.data) {
   document.getElementById('posInput').value = JSON.stringify(EMBEDDED.data, null, 2);
-  if (EMBEDDED.buyingPower) document.getElementById('bp').value = EMBEDDED.buyingPower;
+  if (EMBEDDED.netLiq) document.getElementById('netLiq').value = EMBEDDED.netLiq;
+  if (EMBEDDED.optionBp) document.getElementById('optionBp').value = EMBEDDED.optionBp;
+  if (EMBEDDED.stockBp) document.getElementById('stockBp').value = EMBEDDED.stockBp;
   if (EMBEDDED.vix) document.getElementById('vix').value = EMBEDDED.vix;
   if (EMBEDDED.asOf) document.getElementById('asOf').value = EMBEDDED.asOf;
 } else {
@@ -580,7 +590,9 @@ function analyze() {
     return;
   }
   const asOf = document.getElementById('asOf').valueAsDate || new Date();
-  const bp = parseFloat(document.getElementById('bp').value) || 0;
+  const netLiq = parseFloat(document.getElementById('netLiq').value) || 0;
+  const optionBp = parseFloat(document.getElementById('optionBp').value) || 0;
+  const stockBp = parseFloat(document.getElementById('stockBp').value) || 0;
   const vixRaw = document.getElementById('vix').value;
   const vix = vixRaw === '' ? null : parseFloat(vixRaw);
   const mix = {
@@ -588,7 +600,7 @@ function analyze() {
     premium: (parseFloat(document.getElementById('tgtPremium').value) || 0) / 100,
     moon: (parseFloat(document.getElementById('tgtMoon').value) || 0) / 100,
   };
-  render(data.positions, applyRanges(data.watchlist || []), asOf, bp, mix, vix);
+  render(data.positions, applyRanges(data.watchlist || []), asOf, { netLiq, optionBp, stockBp }, mix, vix);
 }
 
 // ---- Strategy grouping ----
@@ -697,9 +709,12 @@ function makeOptionGroup(legs, asOf, stockShares) {
 function makeStockGroup(p) {
   const mult = p.multiplier || 1; // futures carry a point multiplier; equities = 1
   const notional = p.qty * p.underlyingPrice * mult;
+  // Capital deployed in stock = Reg-T margin (~50% of market value), so it
+  // reconciles with "deployed = Net Liq − Option BP". Futures notional is a placeholder.
+  const marginFactor = p.future ? 1 : 0.5;
   return {
     kind: 'stock', symbol: p.symbol, expiration: null, dte: null, legs: [p], shorts: [],
-    netCredit: 0, bucket: 'stock', bpUse: Math.max(0, notional), maxLoss: null,
+    netCredit: 0, bucket: 'stock', bpUse: Math.abs(notional) * marginFactor, maxLoss: null,
     definedRisk: true, covered: false, exposure: Math.abs(notional), mult, isFuture: !!p.future,
     structure: p.future ? 'Future' : 'Stock', strikes: '—', contracts: p.qty,
   };
@@ -976,7 +991,13 @@ function screenWatchlist(watchlist, heldSymbols, fit) {
 const statusIcon = { critical: '&#9679;', serious: '&#9679;', warning: '&#9679;', good: '&#10003;', info: '&#8226;' };
 const statusLabel = { critical: 'Critical', serious: 'Serious', warning: 'Watch', good: 'On track', info: 'Info' };
 
-function render(positions, watchlist, asOf, bp, mix, vix) {
+function render(positions, watchlist, asOf, acct, mix, vix) {
+  // Account capital (from Tastytrade): Net Liq, Option BP, Stock BP.
+  const netLiq = (acct && acct.netLiq) || 0;
+  const optionBp = (acct && acct.optionBp) || 0;
+  const stockBp = (acct && acct.stockBp) || 0;
+  // Total capital deployed = Net Liq − Option BP (equals the broker's BP Usage).
+  const deployedTotal = Math.max(0, netLiq - optionBp);
   document.getElementById('results').style.display = 'block';
 
   // Legs are grouped into strategies; every metric below is per-strategy.
@@ -1000,25 +1021,24 @@ function render(positions, watchlist, asOf, bp, mix, vix) {
   const bpUsed = { stock: 0, premium: 0, moon: 0 };
   groups.forEach(g => { bpUsed[g.bucket] += g.bpUse; });
 
-  const totalDeployed = bpUsed.stock + bpUsed.premium + bpUsed.moon;
   const deploymentTarget = vix != null && !isNaN(vix) ? vixDeploymentTarget(vix) : null;
 
   const bpPanel = document.getElementById('bpPanel');
   const bucketGaps = [];
-  if (bp > 0 && deploymentTarget != null) {
+  if (netLiq > 0 && deploymentTarget != null) {
     bpPanel.style.display = 'block';
     document.getElementById('bpSubtitle').textContent =
-      `/VX ${vix} → target total deployment ${Math.round(deploymentTarget*100)}% of buying power. The mix below splits that deployed amount 40/50/10 (editable).`;
+      `/VX ${vix} → target total deployment ${Math.round(deploymentTarget*100)}% of Net Liq (${fmtMoney(netLiq)}). Total deployed = Net Liq − Option BP = ${fmtMoney(deployedTotal)} (broker BP used). Per-bucket = est. BP used ÷ Net Liq. Mix splits the target 40/50/10 (editable).`;
 
     const rows2 = [
-      { key: 'deployed', label: 'Total deployed', color: 'var(--baseline)', actual: totalDeployed / bp, target: deploymentTarget },
-      { key: 'stock', label: 'Stock', color: seriesColors[0], actual: bpUsed.stock / bp, target: mix.stock * deploymentTarget },
-      { key: 'premium', label: 'Premium selling', color: seriesColors[1], actual: bpUsed.premium / bp, target: mix.premium * deploymentTarget },
-      { key: 'moon', label: 'Moon shots', color: seriesColors[2], actual: bpUsed.moon / bp, target: mix.moon * deploymentTarget },
+      { key: 'deployed', label: 'Total deployed', color: 'var(--baseline)', actual: deployedTotal / netLiq, target: deploymentTarget },
+      { key: 'stock', label: 'Stock', color: seriesColors[0], actual: bpUsed.stock / netLiq, target: mix.stock * deploymentTarget },
+      { key: 'premium', label: 'Premium selling', color: seriesColors[1], actual: bpUsed.premium / netLiq, target: mix.premium * deploymentTarget },
+      { key: 'moon', label: 'Moon shots', color: seriesColors[2], actual: bpUsed.moon / netLiq, target: mix.moon * deploymentTarget },
     ];
     document.getElementById('bpChart').innerHTML = rows2.map(b => {
       const diff = b.actual - b.target;
-      if (b.key !== 'deployed') bucketGaps.push({ ...b, diff, dollarGap: Math.abs(diff) * bp });
+      if (b.key !== 'deployed') bucketGaps.push({ ...b, diff, dollarGap: Math.abs(diff) * netLiq });
       let badge;
       if (Math.abs(diff) < 0.05) badge = `<span class="badge good">${statusIcon.good} On target</span>`;
       else if (diff > 0) badge = `<span class="badge warning">&#9679; ${Math.round(diff*100)}pt over</span>`;
@@ -1150,7 +1170,7 @@ function render(positions, watchlist, asOf, bp, mix, vix) {
     riskBySymbol,
     riskByTheme,
     totalRisk: totalNotional,
-    bp,
+    bp: optionBp,
     vix,
     premiumUnder: bucketGaps.some(g => g.key === 'premium' && g.diff <= -0.05),
   };
