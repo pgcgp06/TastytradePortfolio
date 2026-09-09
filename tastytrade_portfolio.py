@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from datetime import date
@@ -59,6 +60,8 @@ def api(method, path, body=None, token=None):
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
         raise RuntimeError(f"{method} {path} -> HTTP {e.code}: {detail}") from None
+    except urllib.error.URLError as e:  # DNS/TLS/offline - HTTPError subclasses this, so it stays second
+        raise RuntimeError(f"{method} {path} -> network error: {e.reason}") from None
 
 
 def login():
@@ -86,11 +89,19 @@ def login():
         refresh_token = refresh_token or getpass.getpass("  Refresh token: ").strip()
         save_oauth(client_secret, refresh_token)
 
-    resp = api("POST", "/oauth/token", {
-        "grant_type": "refresh_token",
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-    })
+    try:
+        resp = api("POST", "/oauth/token", {
+            "grant_type": "refresh_token",
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+        })
+    except RuntimeError as e:
+        if "HTTP 400" in str(e) or "HTTP 401" in str(e):
+            raise RuntimeError(
+                f"{e}\n\nThe stored client secret / refresh token look invalid or revoked.\n"
+                f"Delete {CONFIG_FILE} and run again to re-enter them."
+            ) from None
+        raise
     token = resp.get("access_token")
     if not token:
         raise RuntimeError(f"No access_token in /oauth/token response: {resp}")
@@ -104,6 +115,10 @@ def save_oauth(client_secret, refresh_token):
         "client_secret": client_secret,
         "refresh_token": refresh_token,
     }))
+    try:
+        CONFIG_FILE.chmod(0o600)  # owner-only; matters when this runs under WSL/macOS/Linux
+    except OSError:
+        pass
 
 
 def pick_account(token):
@@ -198,9 +213,9 @@ def fetch_marks(token, symbols):
     futures = sorted(s for s in symbols if s.startswith("/"))
     params = []
     if equities:
-        params.append("equity=" + urllib.request.quote(",".join(equities), safe=','))
+        params.append("equity=" + urllib.parse.quote(",".join(equities), safe=','))
     if futures:
-        params.append("future=" + urllib.request.quote(",".join(futures), safe=','))
+        params.append("future=" + urllib.parse.quote(",".join(futures), safe=','))
     if not params:
         return {}
     try:
@@ -216,6 +231,37 @@ def fetch_marks(token, symbols):
         return {}
 
 
+def fetch_option_marks(token, items):
+    """Best-effort live marks for the option legs, keyed by option symbol.
+
+    The position payload only carries `close-price` (the previous session's
+    close). The dashboard derives "% of max profit captured" - and therefore the
+    close-at-50% rule - from these, so a stale price mis-times the exit signal.
+    Falls back silently to the close when the quote endpoint is unavailable.
+    """
+    by_type = {"equity-option": [], "future-option": []}
+    for it in items:
+        key = {"Equity Option": "equity-option", "Future Option": "future-option"}.get(
+            it.get("instrument-type"))
+        if key and it.get("symbol"):
+            by_type[key].append(it["symbol"])
+
+    marks = {}
+    for key, syms in by_type.items():
+        for batch in chunks(syms, 40):  # option symbols are long - keep the URL short
+            try:
+                q = urllib.parse.quote(",".join(batch), safe=',')
+                resp = api("GET", f"/market-data/by-type?{key}={q}", token=token)
+            except RuntimeError as e:
+                print(f"  (couldn't fetch option marks - using previous close: {e})")
+                continue
+            for quote in resp.get("data", {}).get("items", []):
+                mark = num(quote.get("mark")) or num(quote.get("last")) or num(quote.get("close"))
+                if mark is not None and quote.get("symbol"):
+                    marks[quote["symbol"]] = mark
+    return marks
+
+
 def build_positions(token, acct):
     resp = api("GET", f"/accounts/{acct}/positions", token=token)
     items = resp["data"]["items"]
@@ -224,6 +270,7 @@ def build_positions(token, acct):
     for it in items:
         underlyings.add(it.get("underlying-symbol") or it["symbol"])
     marks = fetch_marks(token, underlyings)
+    opt_marks = fetch_option_marks(token, items)
 
     for it in items:
         itype = it.get("instrument-type", "")
@@ -232,6 +279,7 @@ def build_positions(token, acct):
             qty = -abs(qty)
         avg_open = num(it.get("average-open-price"))
         close = num(it.get("close-price"))
+        opt_mark = opt_marks.get(it["symbol"], close)  # live mark, else previous close
         und_sym = it.get("underlying-symbol") or it["symbol"]
         und_price = marks.get(und_sym) or (close if itype == "Equity" else None) or 0
 
@@ -249,7 +297,7 @@ def build_positions(token, acct):
             pos = {
                 "symbol": occ["symbol"], "type": occ["type"], "side": side,
                 "strike": occ["strike"], "expiration": occ["expiration"],
-                "qty": abs(qty), "currentPrice": close,
+                "qty": abs(qty), "currentPrice": opt_mark,
                 "underlyingPrice": marks.get(und_sym) or 0,
             }
             pos["credit" if side == "short" else "cost"] = avg_open
@@ -264,7 +312,7 @@ def build_positions(token, acct):
             pos = {
                 "symbol": und_sym, "type": fo["type"], "side": side,
                 "strike": fo["strike"], "expiration": fo["expiration"],
-                "qty": abs(qty), "currentPrice": close,
+                "qty": abs(qty), "currentPrice": opt_mark,
                 "underlyingPrice": marks.get(und_sym) or 0, "future": True,
             }
             if mult:
@@ -316,7 +364,7 @@ def fetch_market_metrics(token, symbols):
     for batch in chunks(list(symbols)):
         try:
             q = ",".join(sorted(batch))
-            resp = api("GET", f"/market-metrics?symbols={urllib.request.quote(q, safe=',')}", token=token)
+            resp = api("GET", f"/market-metrics?symbols={urllib.parse.quote(q, safe=',')}", token=token)
         except RuntimeError as e:
             print(f"  (couldn't fetch market metrics - screen shows '?': {e})")
             continue
@@ -337,6 +385,9 @@ def fetch_market_metrics(token, symbols):
             metrics[sym] = {
                 # IVR comes back as a 0-1 fraction; the dashboard also normalizes.
                 "ivr": round(ivr * 100, 1) if ivr is not None and ivr <= 1.5 else ivr,
+                # Raw IV (fraction) - the dashboard needs it to size 1 sigma and
+                # turn a candidate into concrete strikes.
+                "iv": num(it.get("implied-volatility-index")),
                 "liquidity": int(liq) if liq is not None else None,
                 "beta": num(it.get("beta")),
                 "earningsDays": earn_days,
@@ -350,7 +401,7 @@ def fetch_quotes(token, symbols):
     for batch in chunks(list(symbols)):
         try:
             q = ",".join(sorted(batch))
-            resp = api("GET", f"/market-data/by-type?equity={urllib.request.quote(q, safe=',')}", token=token)
+            resp = api("GET", f"/market-data/by-type?equity={urllib.parse.quote(q, safe=',')}", token=token)
         except RuntimeError as e:
             print(f"  (couldn't fetch watchlist quotes: {e})")
             continue
@@ -400,7 +451,7 @@ def build_watchlist(token):
         qv = quotes.get(sym, {})
         watchlist.append({
             "symbol": sym, "list": first_list[sym],
-            "price": qv.get("price"), "ivr": m.get("ivr"),
+            "price": qv.get("price"), "ivr": m.get("ivr"), "iv": m.get("iv"),
             "liquidity": m.get("liquidity"), "beta": m.get("beta"),
             "earningsDays": m.get("earningsDays"),
             "yearHigh": qv.get("yearHigh"), "yearLow": qv.get("yearLow"),
@@ -418,23 +469,34 @@ def main():
     print(f"  {len(positions)} positions mapped.")
     net_liq, option_bp, stock_bp = fetch_balances(token, acct)
 
-    # The API supplies positions + buying power; you upload your watchlist CSV in
-    # the dashboard. That raw export has no 52-week columns, so pre-fetch the
-    # ranges for your account's watchlist symbols here and embed them as a lookup
-    # — the dashboard fills them into the uploaded rows (near-high/near-low rule).
-    print("Fetching 52-week ranges for your watchlist symbols...")
+    # Pull the account's own watchlists, enriched with everything the screen needs
+    # (price, IVR, raw IV, liquidity, earnings, 52-week range), and embed them so
+    # the dashboard has candidates on first open. The 52-week ranges are embedded
+    # separately too, as a lookup that fills in a manually uploaded CSV - that raw
+    # export has no 52-week columns (near-high / near-low rule).
+    print("Fetching watchlist metrics and 52-week ranges...")
     api_wl = build_watchlist(token)
     ranges = {w["symbol"]: [w["yearLow"], w["yearHigh"]]
               for w in api_wl if w.get("yearLow") is not None and w.get("yearHigh") is not None}
-    print(f"  52-week ranges for {len(ranges)} symbols.")
+    print(f"  {len(api_wl)} candidates embedded; 52-week ranges for {len(ranges)} symbols.")
 
-    vix = input("/VX level (Enter to set later in the dashboard): ").strip()
+    vix = None
+    while True:
+        raw = input("/VX level (Enter to set later in the dashboard): ").strip()
+        if not raw:
+            break
+        try:
+            vix = float(raw.replace(",", "."))
+            break
+        except ValueError:
+            print("  Enter a number like 16.7, or just press Enter.")
+
     payload = {
-        "data": {"positions": positions, "watchlist": []},
+        "data": {"positions": positions, "watchlist": api_wl},
         "netLiq": net_liq,
         "optionBp": option_bp,
         "stockBp": stock_bp,
-        "vix": float(vix) if vix else None,
+        "vix": vix,
         "asOf": date.today().isoformat(),
         "ranges": ranges,
     }
@@ -444,12 +506,19 @@ def main():
     marker_start, marker_end = "/*__DATA__*/", "/*__END__*/"
     a = html.index(marker_start)
     b = html.index(marker_end) + len(marker_end)
-    html = html[:a] + json.dumps(payload) + html[b:]
+    # The payload lands inside a <script> block, so a literal "</" in any string
+    # would close it early. < is the same character to JSON.parse.
+    embedded = json.dumps(payload).replace("</", "<\\/")
+    html = html[:a] + embedded + html[b:]
     OUTPUT_HTML.write_text(html, encoding="utf-8")
 
     print(f"\nDashboard written to {OUTPUT_HTML}")
-    print("Next: in the dashboard, click 'Upload file' and drop your watchlist CSV")
-    print("to screen it for the top trade candidates against your positions.")
+    if api_wl:
+        print("Your watchlists are already screened in it. To score a different list,")
+        print("click 'Upload watchlist CSV' and drop the export.")
+    else:
+        print("Next: in the dashboard, click 'Upload watchlist CSV' and drop your")
+        print("watchlist export to screen it for the top trade candidates.")
     webbrowser.open(OUTPUT_HTML.as_uri())
 
 

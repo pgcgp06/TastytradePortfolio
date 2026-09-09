@@ -234,7 +234,7 @@ details summary { cursor: pointer; font-size: 0.8rem; color: var(--text-secondar
         Strategy grouping: option legs sharing an underlying and expiration are analyzed as one strategy (vertical, strangle, iron condor, …), so risk and buying power reflect the combined structure — a defined-risk spread uses width − net credit, not naked margin on each leg; a short call covered by held shares waives its margin.
         Deployment: <strong>Total deployed = Net Liq − Option BP</strong> (equals your broker's BP Usage), shown as a % of Net Liq. Per-bucket = estimated BP used ÷ Net Liq. Buckets: stock = ~50% Reg-T margin of market value; premium selling = net-credit structures with a short leg (defined-risk = width − credit; naked = ~20% of underlying notional, a rough Reg-T-style estimate, not your broker's figure); moon shots = net-debit / long-only structures, capital = debit paid.
         Total deployment cap is set by /VX (rulebook): ≥25 → deploy up to 50% of total buying power; 20-25 → 45%; 18-20 → 40%; below 18 → 30%. The stock/premium/moon-shot mix percentages above apply to that deployed (allocated) portion, not total buying power.
-        CSV upload: a header row plus columns like Symbol, Type (call/put/stock), Quantity (negative = short), Strike, Expiration, Price/Avg Open Price, Mark, Underlying Price. OCC option symbols (e.g. "AAPL 260711P00180000") are decoded automatically. The parsed result lands in the box above for review — nothing leaves this page.
+        CSV upload: a header row plus columns like Symbol, Type, Call/Put, Quantity (negative = short), Strike Price, Exp Date, Trade Price, Mark, Underlying Last Price. The Call/Put column wins over a generic Type of "Equity Option"; OCC option symbols (e.g. "AAPL 260711P00180000") are decoded automatically; rows with no quantity (broker "Total" lines) are skipped. The parsed result lands in the box above for review — nothing leaves this page.
       </div>
     </details>
     <div class="error" id="errorMsg" style="display:none"></div>
@@ -284,10 +284,17 @@ details summary { cursor: pointer; font-size: 0.8rem; color: var(--text-secondar
 
     <div class="panel">
       <div class="header-row" style="align-items:center;margin-bottom:10px">
-        <h2 style="margin:0">New trade candidates</h2>
+        <h2 style="margin:0">Option candidates &mdash; premium selling <span style="font-weight:400;color:var(--text-secondary);font-size:0.9rem">(max 8 &middot; TT-OT &sect;A)</span></h2>
         <button id="uploadWatchBtn">&#128228; Upload watchlist CSV</button>
       </div>
       <div id="ideasList"></div>
+    </div>
+
+    <div class="panel">
+      <div class="header-row" style="align-items:center;margin-bottom:10px">
+        <h2 style="margin:0">Stock candidates &mdash; directional <span style="font-weight:400;color:var(--text-secondary);font-size:0.9rem">(max 3 &middot; Druckenmiller &middot; TT-OT &sect;B)</span></h2>
+      </div>
+      <div id="stocksList"></div>
     </div>
   </div>
 </div>
@@ -406,13 +413,17 @@ function parseCsv(text) {
   const col = names => { for (const n of names) { const i = headers.indexOf(n); if (i !== -1) return i; } return -1; };
   const cSymbol = col(['symbol','instrument','instrumentsymbol']);
   const cUnderlying = col(['underlyingsymbol','underlying','rootsymbol','root']);
-  const cType = col(['type','callput','callorput','instrumenttype','optiontype','securitytype']);
+  // Instrument class ("Equity", "Equity Option", "OPTION", ...) and the call/put
+  // right live in SEPARATE columns in the Tastytrade export. Read them apart, or a
+  // generic Type shadows the real Call/Put column and every put becomes a call.
+  const cType = col(['type','instrumenttype','securitytype','instrumentclass']);
+  const cRight = col(['callput','callorput','putcall','optiontype','right']);
   const cQty = col(['quantity','qty','position']);
   const cStrike = col(['strike','strikeprice']);
   const cExp = col(['expiration','expirationdate','expdate','expiry','expirydate']);
   const cOpen = col(['avgopenprice','averageopenprice','openprice','tradeprice','costbasis','averageprice','avgprice']);
   const cMark = col(['mark','markprice','currentprice','last','lastprice','price']);
-  const cUndPrice = col(['underlyingprice','underlyingmark','stockprice','spotprice']);
+  const cUndPrice = col(['underlyingprice','underlyinglastprice','underlyinglast','underlyingmark','stockprice','spotprice']);
   if (cSymbol === -1 && cUnderlying === -1) throw new Error('No Symbol column found in the header row.');
 
   const num = v => { if (v == null || v === '') return null; const n = parseFloat(String(v).replace(/[$,()]/g, m => m === '(' ? '-' : m === ')' ? '' : '')); return isNaN(n) ? null : n; };
@@ -421,11 +432,17 @@ function parseCsv(text) {
   return lines.slice(1).map(line => {
     const f = splitCsvLine(line);
     const rawSym = (cSymbol !== -1 ? f[cSymbol] : f[cUnderlying]) || '';
-    const qty = num(cQty !== -1 ? f[cQty] : null) ?? 1;
+    if (!rawSym) return null;
+    // Brokers append a "Total"/summary row with no quantity. A real position row
+    // always has one when the file carries that column, so use it to drop them.
+    const qtyRaw = cQty !== -1 ? num(f[cQty]) : null;
+    if (cQty !== -1 && qtyRaw == null) return null;
+    const qty = qtyRaw ?? 1;
     const openPx = num(cOpen !== -1 ? f[cOpen] : null);
     const mark = num(cMark !== -1 ? f[cMark] : null);
     const undPx = num(cUndPrice !== -1 ? f[cUndPrice] : null);
     const typeRaw = (cType !== -1 ? f[cType] : '').toLowerCase();
+    const rightRaw = (cRight !== -1 ? f[cRight] : '').toLowerCase();
 
     let symbol = (cUnderlying !== -1 ? f[cUnderlying] : rawSym).replace(/\s.*$/, '');
     let type = null, strike = num(cStrike !== -1 ? f[cStrike] : null), expiration = cExp !== -1 ? f[cExp] : null;
@@ -438,8 +455,12 @@ function parseCsv(text) {
       strike = parseInt(m[4], 10) / 1000;
     }
     if (!type) {
-      if (/call|^c$/.test(typeRaw)) type = 'call';
-      else if (/put|^p$/.test(typeRaw)) type = 'put';
+      const cp = rightRaw || typeRaw;
+      if (/call|^c$/.test(cp)) type = 'call';
+      else if (/put|^p$/.test(cp)) type = 'put';
+      // "Equity Option" contains "equity" — only read Type as stock when it is
+      // not an option, otherwise both legs of a strangle land as shares.
+      else if (/option/.test(typeRaw)) type = strike != null ? 'call' : 'stock';
       else if (/stock|equity|share/.test(typeRaw) || (strike == null && !expiration)) type = 'stock';
       else if (strike != null) type = 'call'; // has a strike but no C/P info; user can correct in the box
       else type = 'stock';
@@ -456,7 +477,7 @@ function parseCsv(text) {
     const pos = { symbol, type, side, strike, expiration, qty: Math.abs(qty), currentPrice: mark, underlyingPrice: undPx ?? 0 };
     if (side === 'short') pos.credit = openPx; else pos.cost = openPx;
     return pos;
-  });
+  }).filter(Boolean);
 }
 
 // A watchlist CSV (e.g. the Tastytrade watchlist export) has no strike/quantity,
@@ -481,16 +502,32 @@ function countStars(v) {
   if (filled || /☆/.test(s)) return filled;           // "★★★☆" -> 3
   const n = wlNum(s); return n != null ? n : null;      // numeric rating fallback
 }
+// Accepts "Nov 4", "Nov 4, 2026", "2026-11-04" and "11/4/2026". An unrecognised
+// format must return null rather than a wrong number — null shows as "Earnings: ?"
+// and warns, whereas a silent miss would let a trade through the no-earnings rule.
 function earnToDays(v, asOf) {
   if (v == null) return null;
   const s = String(v).replace(/[<>]/g, '').trim();
   if (!s || s === '--') return null;
-  const m = s.toLowerCase().match(/([a-z]{3})[a-z]*\.?\s+(\d{1,2})/);
-  if (!m || !(m[1] in MONTHS)) return null;
-  const today = asOf || new Date();
-  let d = new Date(today.getFullYear(), MONTHS[m[1]], parseInt(m[2], 10));
-  if (d < today) d = new Date(today.getFullYear() + 1, MONTHS[m[1]], parseInt(m[2], 10));
-  return Math.round((d - today) / 86400000);
+  const today = dayNum(asOf || new Date());
+  const baseYear = new Date(today * 86400000).getUTCFullYear();
+  const days = (y, mo, d) => Math.round(Date.UTC(y, mo, d) / 86400000 - today);
+  const rolled = (mo, d) => { const n = days(baseYear, mo, d); return n >= 0 ? n : days(baseYear + 1, mo, d); };
+
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);                 // 2026-11-04
+  if (m) return days(+m[1], +m[2] - 1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);            // 11/4/2026 or 11/4
+  if (m) {
+    const mo = +m[1] - 1, d = +m[2];
+    if (mo < 0 || mo > 11) return null;
+    return m[3] ? days(m[3].length === 2 ? 2000 + +m[3] : +m[3], mo, d) : rolled(mo, d);
+  }
+  m = s.toLowerCase().match(/([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?/); // Nov 4[, 2026]
+  if (m && m[1] in MONTHS) {
+    const mo = MONTHS[m[1]], d = +m[2];
+    return m[3] ? days(+m[3], mo, d) : rolled(mo, d);
+  }
+  return null;
 }
 
 function parseWatchlistCsv(text, asOf) {
@@ -499,7 +536,7 @@ function parseWatchlistCsv(text, asOf) {
   const headers = splitCsvLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
   const col = names => { for (const n of names) { const i = headers.indexOf(n); if (i !== -1) return i; } return -1; };
   const cSym = col(['symbol','ticker']);
-  const cPrice = col(['mid','price','last','mark']);
+  const cPrice = col(['mid','midprice','price','last','lastprice','mark']);
   const cIvr = col(['ivrank','ivr','impliedvolatilityrank']);
   const cIv = col(['ividx','iv','impliedvolatility','ivindex']); // raw IV for strike (1σ) estimates
   const cLiq = col(['liquidity','liquidityrating']);
@@ -569,7 +606,17 @@ function vixDeploymentTarget(vix) {
 }
 document.getElementById('analyzeBtn').addEventListener('click', analyze);
 
-function daysBetween(a, b) { return Math.round((b - a) / 86400000); }
+// Expirations are calendar dates, so count whole UTC days. Mixing a UTC-midnight
+// Date (what <input type=date>.valueAsDate returns) with a local-midnight one
+// parsed from "YYYY-MM-DD" would skew DTE by a day for some timezones/DST.
+function dayNum(v) {
+  if (typeof v === 'string') {
+    const p = v.split('-');
+    return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000;
+  }
+  return Math.floor(v.getTime() / 86400000);
+}
+function dteBetween(asOf, expiration) { return Math.round(dayNum(expiration) - dayNum(asOf)); }
 function fmtMoney(n) { return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, {maximumFractionDigits:0}); }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
@@ -657,23 +704,35 @@ function strikesLabel(legs) {
     .map(l => `${l.side === 'short' ? '-' : '+'}${l.strike}${l.type === 'call' ? 'C' : 'P'}`).join(' / ');
 }
 
-function makeOptionGroup(legs, asOf, stockShares) {
+function makeOptionGroup(legs, asOf, sharePool) {
   const symbol = legs[0].symbol;
   const expiration = legs[0].expiration || null;
   const und = Math.max(0, ...legs.map(l => l.underlyingPrice || 0));
   const mult = legs[0].multiplier || 100; // contract multiplier (futures options vary)
   const isFuture = legs.some(l => l.future);
-  const dte = expiration ? daysBetween(asOf, new Date(expiration + 'T00:00:00')) : null;
+  const dte = expiration ? dteBetween(asOf, expiration) : null;
   const shorts = legs.filter(l => l.side === 'short');
   const netCredit = legs.reduce((s, l) => s + (l.side === 'short' ? 1 : -1) * optPrem(l) * mult * Math.abs(l.qty), 0);
 
   const put = sideRisk(legs, 'put', und, mult);
   const call = sideRisk(legs, 'call', und, mult);
 
-  // A short call is covered when enough shares are held against it.
+  // A short call is covered by held shares. Consume them from the pool so the
+  // same 100 shares can't be counted as cover for a second expiration cycle, and
+  // cover only as many contracts as the shares actually back (partial cover keeps
+  // the remainder naked rather than flipping the whole group to defined risk).
   let covered = false;
-  const heldShares = stockShares[symbol] || 0;
-  if (call.nakedQty > 0 && heldShares >= call.nakedQty * 100) { call.nakedMargin = 0; covered = true; }
+  if (call.nakedQty > 0 && !isFuture) {
+    const lots = Math.floor((sharePool[symbol] || 0) / 100);
+    const cov = Math.min(call.nakedQty, lots);
+    if (cov > 0) {
+      sharePool[symbol] -= cov * 100;
+      call.nakedMargin *= (call.nakedQty - cov) / call.nakedQty;
+      call.nakedQty -= cov;
+      call.defined = call.nakedQty === 0;
+      covered = true;
+    }
+  }
 
   const definedWidth = Math.max(put.width, call.width); // one tested side at a time
   const nakedMargin = put.nakedMargin + call.nakedMargin;
@@ -682,7 +741,7 @@ function makeOptionGroup(legs, asOf, stockShares) {
   if (netCredit >= 0 && shorts.length) {
     bucket = 'premium';
     const spreadLoss = Math.max(0, definedWidth - netCredit);
-    if (put.defined && (call.defined || covered)) {
+    if (put.defined && call.defined) {
       bpUse = spreadLoss > 0 ? spreadLoss : definedWidth;
       maxLoss = spreadLoss;
     } else {
@@ -730,7 +789,11 @@ function buildGroups(positions, asOf) {
     const k = p.symbol + '|' + (p.expiration || '');
     (byKey[k] = byKey[k] || []).push(p);
   });
-  Object.keys(byKey).forEach(k => groups.push(makeOptionGroup(byKey[k], asOf, stockShares)));
+  // Nearest expiration claims the shares first — that's the short call most at
+  // risk of assignment — so cover is allocated deterministically, not by row order.
+  Object.keys(byKey)
+    .sort((a, b) => (a.split('|')[1] || '9999-99-99').localeCompare(b.split('|')[1] || '9999-99-99'))
+    .forEach(k => groups.push(makeOptionGroup(byKey[k], asOf, stockShares)));
   return groups;
 }
 
@@ -801,6 +864,18 @@ const THEMES = {
 const SYM_THEME = {};
 Object.entries(THEMES).forEach(([t, syms]) => syms.forEach(s => { SYM_THEME[s] = t; }));
 function themeOf(sym) { return SYM_THEME[sym] || sym; }
+
+// Pedro's rule "short only ETFs" can only be enforced if we know what an ETF is:
+// neither the API watchlist nor the CSV carries an instrument type, so recognise
+// the common ones by symbol. Unknown symbol -> treated as a single name (stricter).
+const ETFS = new Set(['SPY','QQQ','IWM','DIA','VOO','VTI','RSP','MDY',
+  'XLE','XLF','XLK','XLV','XLI','XLP','XLY','XLU','XLB','XLC','XLRE','XME','XOP','XRT','XBI','XHB',
+  'SMH','SOXX','SOXL','SOXS','TQQQ','SQQQ','SPXL','SPXS','TNA','TZA','LABU','LABD',
+  'GLD','SLV','GDX','GDXJ','USO','UNG','DBA','DBC','URA','LIT','TAN','ICLN','COPX','PPLT',
+  'TLT','IEF','SHY','HYG','JNK','LQD','TIP','AGG','BND','EMB',
+  'FXI','EEM','EWZ','EWW','EWJ','EWG','EWU','EFA','VEA','VWO','KWEB','ASHR','INDA','EPI',
+  'ARKK','ARKG','IBIT','FBTC','BITO','ETHE','GBTC','KRE','KBE','ITB','JETS','IYT','IGV','HACK','BOTZ','MOO','PBW','VNQ','IYR']);
+function isEtfSym(sym) { return ETFS.has(String(sym || '').toUpperCase()); }
 
 // ---- TT-OT strategy engine ----
 // Ports the Tastytrade "new trades" methodology (skill TT-OT) into the dashboard:
@@ -923,7 +998,7 @@ function screenWatchlist(watchlist, heldSymbols, fit) {
     const price = w.price != null ? Number(w.price) : null;
     const earn = w.earningsDays != null && w.earningsDays !== '' ? Number(w.earningsDays) : null;
     const corr = w.corr != null && w.corr !== '' && !isNaN(w.corr) ? Number(w.corr) : null;
-    const isEtf = w.etf === true || String(w.type || '').toLowerCase() === 'etf';
+    const isEtf = w.etf === true || String(w.type || '').toLowerCase() === 'etf' || isEtfSym(w.symbol);
     const yHigh = w.yearHigh != null ? Number(w.yearHigh) : null;
     const yLow = w.yearLow != null ? Number(w.yearLow) : null;
     const nearHigh = (price != null && yHigh) ? price >= yHigh * 0.90 : null;
@@ -965,6 +1040,10 @@ function screenWatchlist(watchlist, heldSymbols, fit) {
         price, ivr, iv: normIv(w.iv), isEtf, nearHigh, nearLow, bp: (F.bp != null ? Number(F.bp) : null),
       });
       strategy = pick.strategy; rec = pick.rec; plan = pick.plan; assumption = pick.assumption;
+      // Unknown data can't block (most CSVs have gaps) but it must be visible:
+      // a silent "?" would let a trade slip past the no-earnings / IVR>30 rules.
+      if (earn == null) plan.push({ k: '⚠ Earnings', v: 'Data desconhecida — confirmar antes de entrar (regra: nunca em earnings).' });
+      if (ivr == null) plan.push({ k: '⚠ IVR', v: 'IVR desconhecido — confirmar > 30 antes de vender premium.' });
       score += 5;
       if (nearHigh === false && nearLow === false) score += 3;
       if (ivr != null && ivr > 50) score += 3; // strong IV regime — TT preference
@@ -988,6 +1067,143 @@ function screenWatchlist(watchlist, heldSymbols, fit) {
   }).filter(Boolean);
 }
 
+// ---- Stock sleeve: Druckenmiller screen (skill TT-OT §B) ----
+// A different engine on purpose: this is a directional ~18-month position, not
+// premium. No 45 DTE, no 16Δ, no 50% profit target. What the screen CAN see is
+// the tape (52-week range, liquidity, beta, IVR) and the account (Net Liq, /VX);
+// what it CANNOT see is the macro thesis, so it demands one instead of inventing
+// it. Sizing is derived from the invalidation level, never from a round number.
+const STOCK_TIERS = [
+  { key: 'sonda',    name: 'Sonda',          pct: 0.03,  risk: 0.010 },
+  { key: 'nucleo',   name: 'Núcleo',         pct: 0.075, risk: 0.020 },
+  { key: 'conviccao', name: 'Convicção alta', pct: 0.15,  risk: 0.035 },
+];
+
+// /VX is the only macro input the dashboard has. It is a proxy for the liquidity
+// / credit blocks of the §B.2 dashboard, not a substitute — say so in the card,
+// and let a stressed tape cap how far the sizing ladder may be climbed.
+function stockRegime(vix) {
+  const v = (vix == null || isNaN(vix)) ? null : Number(vix);
+  if (v == null) return { label: '/VX desconhecido', cap: 0, note: 'Sem /VX — manter escalão sonda até confirmar o regime.' };
+  if (v < 18) return { label: `/VX ${v} · calmo`, cap: 2, note: 'Vol baixa: escalada até convicção alta permitida se a tese confirmar.' };
+  if (v < 25) return { label: `/VX ${v} · médio`, cap: 1, note: 'Vol média: teto no escalão núcleo até o regime acalmar.' };
+  return { label: `/VX ${v} · stress`, cap: 0, note: 'Vol alta: só sonda (§B.6 — regime contra desce um escalão).' };
+}
+
+// Invalidation = the nearer of "beyond the 52-week extreme" and 15% away. It is a
+// level, not an opinion, and the position size falls out of it: risk ÷ distance.
+// `dist` is the fractional distance from entry to that level (same both sides).
+function stockSizing(price, dist, netLiq, regimeCap) {
+  return STOCK_TIERS.map((t, i) => {
+    const cap = netLiq ? t.pct * netLiq : null;
+    const byRisk = (netLiq && dist) ? (t.risk * netLiq) / dist : null;
+    const budget = (cap != null && byRisk != null) ? Math.min(cap, byRisk) : cap;
+    // Whole shares only, so the position (and its risk) is what would actually be
+    // bought, not the budget line.
+    const shares = (budget != null && price) ? Math.floor(budget / price) : null;
+    const dollars = (shares != null && price) ? shares * price : budget;
+    return {
+      ...t, allowed: i <= regimeCap, budget, shares, dollars,
+      // What the tier actually risks if the invalidation level trades: this is the
+      // number that matters, not the position size.
+      riskDollars: (dollars != null && dist) ? dollars * dist : null,
+      limitedBy: (cap != null && byRisk != null) ? (byRisk < cap ? 'risco' : 'teto') : null,
+    };
+  });
+}
+
+// fit = same object the option screen uses (+ netLiq, stockBp, vix).
+function screenStocks(watchlist, heldSymbols, fit) {
+  const F = fit || {};
+  const regime = stockRegime(F.vix);
+  const netLiq = F.netLiq || null;
+  return (watchlist || []).map(w0 => {
+    const w = typeof w0 === 'string' ? { symbol: w0 } : (w0 || {});
+    if (!w.symbol) return null;
+    const price = w.price != null ? Number(w.price) : null;
+    const ivr = normIvr(w.ivr);
+    const liq = w.liquidity != null ? Number(w.liquidity) : null;
+    const earn = w.earningsDays != null && w.earningsDays !== '' ? Number(w.earningsDays) : null;
+    const beta = w.beta != null && !isNaN(w.beta) ? Number(w.beta) : null;
+    const corr = w.corr != null && w.corr !== '' && !isNaN(w.corr) ? Number(w.corr) : null;
+    const isEtf = w.etf === true || String(w.type || '').toLowerCase() === 'etf' || isEtfSym(w.symbol);
+    const yHigh = w.yearHigh != null ? Number(w.yearHigh) : null;
+    const yLow = w.yearLow != null ? Number(w.yearLow) : null;
+    const offHigh = (price != null && yHigh) ? (yHigh - price) / yHigh : null;      // pullback from 52w high
+    const offLow = (price != null && yLow) ? (price - yLow) / yLow : null;          // cushion above 52w low
+    const inRange = (price != null && yHigh && yLow && yHigh > yLow) ? (price - yLow) / (yHigh - yLow) : null;
+
+    const checks = [];
+    let blocked = false, blockWhy = null, score = 0, side = 'long';
+
+    if (price == null) { blocked = true; blockWhy = 'Sem preço — não é possível dimensionar.'; }
+
+    if (liq != null) { const ok = liq >= 3; checks.push({ k: 'Liquidez', ok, txt: liq + '★' }); if (!ok) { blocked = true; blockWhy = blockWhy || 'Liquidez < 3★ (regra do Pedro).'; } score += ok ? liq * 2 : 0; }
+    else checks.push({ k: 'Liquidez', ok: null, txt: '?' });
+
+    // Earnings: a thesis is 18 months long, but the entry still isn't taken into
+    // a print. Inside 10 days -> wait for the event, don't block the name forever.
+    if (earn != null) { const ok = earn > 10; checks.push({ k: 'Earnings', ok, txt: earn + 'd' }); if (!ok) { blocked = true; blockWhy = blockWhy || `Earnings em ${earn}d — nunca entrar em earnings; reavaliar depois.`; } }
+    else checks.push({ k: 'Earnings', ok: null, txt: '?' });
+
+    // Pedro's timing rules decide the side before any Druckenmiller scoring.
+    if (offHigh != null) {
+      const nearHigh = offHigh < 0.10;
+      if (nearHigh && isEtf) side = 'short';       // near highs + ETF: the only short Pedro allows
+      checks.push({ k: 'Do máx.', ok: nearHigh ? (isEtf ? null : false) : true, txt: '-' + Math.round(offHigh * 100) + '%' });
+      if (nearHigh && !isEtf && !blocked) { blocked = true; blockWhy = `Só -${Math.round(offHigh * 100)}% do máximo de 52s — regra: nunca comprar em máximos (pullback ≥ 10%).`; }
+    } else checks.push({ k: 'Do máx.', ok: null, txt: '?' });
+
+    if (offLow != null) checks.push({ k: 'Do mín.', ok: offLow >= 0.10 ? true : null, txt: '+' + Math.round(offLow * 100) + '%' });
+    if (isEtf) checks.push({ k: 'ETF', ok: true, txt: 'sim' });
+    if (beta != null) checks.push({ k: 'Beta', ok: null, txt: beta.toFixed(2) });
+
+    // --- Druckenmiller-compatible scoring on what the tape shows ---
+    if (side === 'long' && offHigh != null) {
+      // Sweet spot: a real pullback (10-40%) in a name whose structure still holds.
+      if (offHigh >= 0.10 && offHigh <= 0.40) score += 18 + (offHigh - 0.10) * 20;
+      else if (offHigh > 0.40) score += 8;                        // deep — needs a stronger thesis
+      if (offLow != null && offLow < 0.10) { score -= 6; checks.push({ k: 'Estrutura', ok: false, txt: 'perto do mín.' }); }
+      if (inRange != null && inRange >= 0.25 && inRange <= 0.70) score += 6;   // mid-range, not broken
+    }
+    if (side === 'short') score += 10;                            // valid ETF short setup near highs
+
+    // Beta is the macro gearing of the position: reward it when the regime is
+    // calm, penalise it when /VX says the tape is stressed.
+    if (beta != null) score += (F.vix != null && !isNaN(F.vix) && Number(F.vix) >= 22) ? (beta < 1 ? 4 : -3) : (beta > 1 ? 3 : 0);
+    if (corr != null) score += (1 - Math.min(1, Math.abs(corr))) * 3;
+    // IVR > 30 doesn't make it a premium trade — it makes the ENTRY cheaper:
+    // get paid to wait for the price with a ~30Δ put instead of buying at market.
+    if (ivr != null && ivr > 30) { score += 6; checks.push({ k: 'IVR', ok: true, txt: Math.round(ivr) }); }
+    else if (ivr != null) checks.push({ k: 'IVR', ok: null, txt: Math.round(ivr) });
+
+    const theme = themeOf(w.symbol);
+    const symShare = (F.riskBySymbol && F.totalRisk) ? (F.riskBySymbol[w.symbol] || 0) / F.totalRisk : 0;
+    const themeShare = (F.riskByTheme && F.totalRisk) ? (F.riskByTheme[theme] || 0) / F.totalRisk : 0;
+    if (symShare >= 0.15 || themeShare >= 0.20) { score -= 8; checks.push({ k: 'Conc.', ok: false, txt: Math.round(Math.max(symShare, themeShare) * 100) + '% já' }); }
+    else score += 4;
+
+    // Invalidation level and the sizing that falls out of it.
+    const stop = (price == null) ? null
+      : side === 'short' ? (yHigh ? Math.min(yHigh * 1.02, price * 1.15) : price * 1.15)
+      : Math.max(yLow ? yLow * 0.98 : 0, price * 0.85);
+    const stopPct = (price && stop) ? Math.abs(stop - price) / price : null;
+    const tiers = stockSizing(price, stopPct, netLiq, regime.cap);
+    const entry = tiers[0];
+    const bpUsed = (entry && entry.dollars != null) ? entry.dollars * 0.5 : null;  // Reg-T ~50% of what is actually bought
+
+    const vehicle = side === 'short'
+      ? (ivr != null && ivr > 30 ? 'Call credit spread no ETF (~30Δ, risco definido) — shorts só em ETF' : 'Short do ETF ou put spread de débito — shorts só em ETF')
+      : (ivr != null && ivr > 30 ? `Entrar vendendo put ~30Δ (IVR ${Math.round(ivr)}) — pago para esperar o preço; senão comprar a ação` : 'Comprar a ação (IVR baixo: não há prémio que compense esperar)');
+
+    return {
+      symbol: w.symbol, theme, list: w.list || null, held: heldSymbols.has(w.symbol),
+      blocked, blockWhy, score, side, price, ivr, beta, corr, isEtf,
+      offHigh, offLow, inRange, stop, stopPct, tiers, entry, bpUsed, vehicle, regime, checks,
+    };
+  }).filter(Boolean);
+}
+
 const statusIcon = { critical: '&#9679;', serious: '&#9679;', warning: '&#9679;', good: '&#10003;', info: '&#8226;' };
 const statusLabel = { critical: 'Critical', serious: 'Serious', warning: 'Watch', good: 'On track', info: 'Info' };
 
@@ -1008,7 +1224,8 @@ function render(positions, watchlist, asOf, acct, mix, vix) {
   const critCount = groups.filter(g => g.status === 'critical').length;
   const warnCount = groups.filter(g => g.status === 'warning' || g.status === 'serious').length;
   const netCredit = groups.reduce((sum, g) => sum + g.netCredit, 0);
-  const nearestDte = optionGroups.length ? Math.min(...optionGroups.map(g => g.dte).filter(d => d != null)) : null;
+  const dtes = optionGroups.map(g => g.dte).filter(d => d != null);
+  const nearestDte = dtes.length ? Math.min(...dtes) : null; // Math.min() of [] is Infinity
 
   document.getElementById('tiles').innerHTML = `
     <div class="tile"><div class="value">${groups.length}</div><div class="label">Strategies (${positions.length} legs)</div></div>
@@ -1219,10 +1436,80 @@ function render(positions, watchlist, asOf, acct, mix, vix) {
 
   document.getElementById('ideasList').innerHTML =
     cta +
-    (top.length ? `<h3>Top ${top.length} — melhores trades por potencial <span style="font-weight:400;color:var(--text-secondary)">(${esc(vxReg)})</span></h3>${topHtml}` : '') +
+    (top.length ? `<h3>Top ${top.length} de ${TOP_N} — melhores trades de prémio por potencial <span style="font-weight:400;color:var(--text-secondary)">(${esc(vxReg)})</span></h3>${topHtml}` : '') +
     (rest.length ? `<details style="margin-top:10px"><summary>Restantes ${rest.length} símbolos da watchlist (bloqueados / menor potencial / já em carteira)</summary>${restHtml}</details>` : '') +
     (ideas.length ? `<h3 style="margin-top:14px">Portfolio gaps</h3>${gapHtml}` : '') ||
     '<div class="empty">Upload a watchlist CSV to get trade candidates.</div>';
+
+  // ---- Stock candidates (Druckenmiller sleeve, max 3) ----
+  renderStockCandidates(watchlist, heldSymbols, { ...fit, netLiq, stockBp }, new Set(top.map(c => c.symbol)));
+}
+
+// Max 3 on purpose: this sleeve is "few positions, sized by conviction". A long
+// list of stock ideas would already be a contradiction of the method.
+const STOCK_TOP_N = 3;
+function renderStockCandidates(watchlist, heldSymbols, fit, premiumTop) {
+  const el = document.getElementById('stocksList');
+  if (!el) return;
+  const scored = screenStocks(watchlist, heldSymbols, fit);
+  const regime = stockRegime(fit.vix);
+  const tradeable = scored.filter(c => !c.blocked && !c.held).sort((a, b) => b.score - a.score);
+  // One name per theme: three ideas from the same sector is one idea in disguise.
+  const top = [], seen = new Set();
+  for (const c of tradeable) { if (top.length >= STOCK_TOP_N) break; if (seen.has(c.theme)) continue; top.push(c); seen.add(c.theme); }
+  const rest = scored.filter(c => !top.includes(c)).sort((a, b) => (a.held - b.held) || (a.blocked - b.blocked) || (b.score - a.score));
+
+  const money = v => v == null ? '—' : fmtMoney(v);
+  const row = (k, v) => `<div><strong style="color:var(--text-secondary)">${esc(k)}:</strong> ${v}</div>`;
+  const badge = c => `<span class="badge ${c.ok === true ? 'good' : c.ok === false ? 'critical' : 'info'}">${esc(c.k)}: ${esc(String(c.txt))}</span>`;
+
+  const card = (c, rank) => {
+    const ladder = c.tiers.map(t => {
+      const size = t.shares === 0 ? 'nome grande demais para o escalão'
+        : t.shares != null ? `${t.shares} aç. · ${money(t.dollars)}` : money(t.dollars);
+      const risk = t.riskDollars != null ? ` · risco ${money(t.riskDollars)}${fit.netLiq ? ` (${(100 * t.riskDollars / fit.netLiq).toFixed(1)}% NL)` : ''}` : '';
+      return `<span class="badge ${t.allowed ? (t.key === 'sonda' ? 'good' : 'info') : 'warning'}">${esc(t.name)}: ${esc(size + risk)}${t.allowed ? '' : ' — bloqueado pelo regime'}</span>`;
+    }).join('');
+    const dirTxt = c.side === 'short' ? 'Baixista (ETF)' : 'Altista';
+    const timing = c.side === 'short'
+      ? `ETF a ${c.offHigh != null ? Math.round(c.offHigh * 100) : '?'}% do máximo — confirmar <strong>≥ 5 dias de ganhos</strong> antes de entrar (o dashboard não tem histórico diário).`
+      : `Pullback <strong>${c.offHigh != null ? Math.round(c.offHigh * 100) : '?'}%</strong> do máx. de 52s${c.offLow != null ? `, ${Math.round(c.offLow * 100)}% acima do mín.` : ''} — confirmar <strong>≥ 2 dias de perdas</strong> antes de entrar.`;
+    return `<div class="idea-card">
+      <strong>${rank ? `#${rank} · ` : ''}${esc(c.symbol)} — ${esc(dirTxt)}</strong>
+      ${rank ? `<span class="badge good">potencial ${Math.round(c.score)}</span>` : ''}
+      ${c.theme && c.theme !== c.symbol ? `<span class="badge info">${esc(c.theme)}</span>` : ''}
+      ${c.list ? `<span class="badge info">${esc(c.list)}</span>` : ''}
+      ${c.held ? '<span class="badge warning">já em carteira</span>' : ''}
+      ${c.blocked ? '<span class="badge critical">bloqueado</span>' : ''}
+      ${premiumTop && premiumTop.has(c.symbol) ? '<span class="badge info">também candidato de prémio</span>' : ''}
+      <div style="margin-top:6px;font-size:0.85rem;line-height:1.55">
+        ${c.blocked ? row('Bloqueio', esc(c.blockWhy || 'Não cumpre os filtros de entrada.')) : ''}
+        ${row('Veículo', esc(c.vehicle))}
+        ${row('Timing', timing)}
+        ${row('Invalidação / stop', c.stop != null ? `$${esc(c.stop.toFixed(2))} (${c.stopPct != null ? (c.side === 'short' ? '+' : '−') + Math.round(c.stopPct * 100) + '%' : '?'}) — o mais próximo entre o extremo de 52s e 15%. <em>Substituir por um facto observável assim que a tese existir.</em>` : '—')}
+        ${row('Escalões', `${ladder}<div style="margin-top:4px;color:var(--text-secondary)">Entrar na <strong>sonda</strong>; subir de escalão só com um <strong>facto novo</strong>, nunca por o preço ter subido. Nunca fazer average down.</div>`)}
+        ${row('BP (Reg-T ~50%)', `${money(c.bpUsed)} na sonda${fit.stockBp ? ` · Stock BP disponível ${money(fit.stockBp)}` : ''}`)}
+        ${row('Gestão', 'Sem alvo de lucro fixo — deixar correr. Sair na totalidade se a tese for invalidada. Não vender CC sobre convicção alta com a tese a correr.')}
+      </div>
+      <div class="legend" style="margin-top:8px">${c.checks.map(badge).join('')}</div>
+    </div>`;
+  };
+
+  // Said once for the whole sleeve instead of repeated on every card.
+  const note = `<div class="disclaimer" style="border-left-color:var(--series-4);margin-bottom:12px">
+    <strong>Tese antes de tamanho.</strong> Nenhuma destas entradas é válida sem a frase do §B.3 escrita:
+    <em>"Em ~18 meses X vale mais/menos porque Y; hoje o preço assume Z; o catalisador é C; sei que estou errado se W."</em>
+    O dashboard não escreve a tese — só mostra o que a fita e a conta dizem.<br>
+    <strong>Macro:</strong> ${esc(regime.label)} — ${esc(regime.note)} O /VX é <em>proxy</em>: confirmar Fed/liquidez, taxas, dólar e crédito (§B.2) antes de entrar.
+  </div>`;
+
+  const noWatch = scored.length === 0;
+  el.innerHTML = noWatch
+    ? '<div class="empty">Sem watchlist carregada — as propostas de ações usam a mesma lista das opções.</div>'
+    : note + (top.length
+        ? `<h3>Top ${top.length} de ${STOCK_TOP_N} — posições direcionais <span style="font-weight:400;color:var(--text-secondary)">(${esc(regime.label)} · um nome por tema)</span></h3>${top.map((c, i) => card(c, i + 1)).join('')}`
+        : '<div class="empty">Nenhum candidato de ação passa os filtros hoje (pullback ≥ 10%, liquidez, earnings). Não entrar é uma decisão.</div>')
+      + (rest.length ? `<details style="margin-top:10px"><summary>Restantes ${rest.length} símbolos (bloqueados / menor potencial / já em carteira)</summary>${rest.map(c => card(c, 0)).join('')}</details>` : '');
 }
 </script>
 </body>
